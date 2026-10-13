@@ -748,6 +748,266 @@ Los ejercicios 1, 2 y 4 usan recursos del provider `random`, no recursos de infr
 
 Para los workspaces VCS-driven, revisa primero las opciones de destrucción disponibles en la UI. No elimines el workspace hasta confirmar que ya no lo necesitas y que el state se ha tratado según las políticas de tu equipo. Elimina ramas de prueba y carpetas locales cuando hayas entregado las evidencias. Nunca borres un state a mano como sustituto de `destroy`.
 
+
+
+---
+
+# Ejercicio 6 — Desplegar un bucket S3 en AWS desde HCP Terraform
+
+**Nivel:** avanzado  
+**Duración sugerida:** 40–50 minutos  
+**Objetivo:** desplegar un recurso real de AWS con ejecución remota, state administrado por HCP Terraform y autenticación temporal OIDC, sin guardar access keys en el workspace.
+
+**Arquitectura del laboratorio:** GitHub/CLI → HCP Terraform (plan y apply remoto) → OIDC → rol IAM limitado → bucket S3 privado.
+
+> **Costos y permisos:** necesitas una cuenta AWS de laboratorio y permisos para configurar IAM OIDC, roles y políticas. Aunque un bucket vacío suele tener un costo directo mínimo o nulo, AWS puede cobrar por almacenamiento, solicitudes y otros servicios. No uses una cuenta productiva. Si no tienes permisos IAM, solicita al administrador que prepare el proveedor OIDC, el rol y la política. No crees access keys de larga duración para resolver problemas de permisos.
+
+## Paso 1. Crear un workspace de HCP Terraform
+
+1. En HCP Terraform, crea un workspace CLI-driven llamado `sesion04-06-aws-s3`.
+2. Anota el nombre de tu organización y, si corresponde, el proyecto de HCP Terraform al que pertenece.
+3. En **Settings**, localiza la configuración de ejecución y selecciona Terraform **1.16.5**, siempre que siga siendo la versión estable aprobada para el curso. La restricción del código debe ser compatible con esa versión.
+4. No ejecutes aún ningún apply: primero configuraremos el acceso a AWS.
+
+## Paso 2. Crear la relación de confianza OIDC en AWS
+
+La forma más sencilla para el laboratorio es usar la opción oficial **AWS Quick Setup** desde la página Variables del workspace, si está disponible y tienes permisos de administrador de IAM. Esta opción guía la configuración de confianza y credenciales dinámicas. Consulta [AWS quick setup de HCP Terraform](https://developer.hashicorp.com/terraform/cloud-docs/dynamic-provider-credentials/aws-configuration/quick-setup).
+
+Si debes configurarlo manualmente, sigue la guía oficial de [credenciales dinámicas AWS](https://developer.hashicorp.com/terraform/cloud-docs/dynamic-provider-credentials/aws-configuration):
+
+1. En la consola AWS, abre **IAM → Identity providers** y verifica si ya existe el proveedor OIDC `https://app.terraform.io`. No intentes crear un duplicado.
+2. Si no existe, crea un proveedor OpenID Connect con URL `https://app.terraform.io` y audience `aws.workload.identity`.
+3. Crea un rol IAM para HCP Terraform. En la relación de confianza, permite asumir el rol mediante `sts:AssumeRoleWithWebIdentity` solo al proveedor OIDC de HCP Terraform.
+4. Limita la condición de audiencia a `aws.workload.identity`.
+5. Restringe la condición `sub` al workspace de este laboratorio, usando el formato documentado por HashiCorp para tu organización/proyecto/workspace. No uses una condición comodín que permita a cualquier workspace de cualquier organización asumir el rol.
+6. Adjunta al rol una política de permisos para el bucket del ejercicio. Para enseñar mínimo privilegio, limita las operaciones de lectura/actualización/borrado al ARN del bucket de laboratorio y sus objetos. La creación inicial del bucket puede requerir `s3:CreateBucket` sobre `*`; si se concede, limita esa excepción al rol exclusivo del laboratorio y retírala cuando ya no se necesite. No concedas `AdministratorAccess`.
+
+**Importante:** los nombres exactos de los campos de trust policy dependen del método de configuración. Usa el ejemplo de política de confianza de la documentación oficial y sustituye los valores por los de tu organización y workspace; no copies una política genérica sin restringirla.
+
+## Paso 3. Configurar credenciales dinámicas en el workspace
+
+1. Regresa a HCP Terraform y abre el workspace `sesion04-06-aws-s3`.
+2. En **Variables**, agrega las siguientes variables de entorno:
+
+| Nombre | Valor |
+|---|---|
+| `TFC_AWS_PROVIDER_AUTH` | `true` |
+| `TFC_AWS_RUN_ROLE_ARN` | ARN del rol IAM creado para el laboratorio |
+| `AWS_REGION` | Región aprobada por el instructor, por ejemplo `us-east-1` |
+
+3. Guarda las variables. No agregues `AWS_ACCESS_KEY_ID` ni `AWS_SECRET_ACCESS_KEY`: el objetivo es que HCP Terraform obtenga credenciales temporales mediante OIDC.
+4. Confirma que la trust policy del rol permite a este workspace y que el rol tiene los permisos S3 necesarios.
+
+## Paso 4. Crear la configuración Terraform
+
+En tu repositorio `terraform-exercises`, crea el directorio `08-terraform-cloud/06-aws-s3`. Crea un archivo `main.tf` con el siguiente contenido y sustituye `MI_ORGANIZACION` por el nombre exacto de tu organización:
+
+```hcl
+terraform {
+  required_version = "~> 1.16.5"
+
+  cloud {
+    organization = "MI_ORGANIZACION"
+
+    workspaces {
+      name = "sesion04-06-aws-s3"
+    }
+  }
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
+  }
+}
+
+provider "aws" {
+  region = var.aws_region
+}
+
+variable "aws_region" {
+  description = "Región AWS configurada en el workspace"
+  type        = string
+  default     = "us-east-1"
+}
+
+variable "bucket_name_prefix" {
+  description = "Prefijo único para el bucket del laboratorio"
+  type        = string
+  default     = "tfcloud-sesion06-lab"
+}
+
+resource "random_id" "suffix" {
+  byte_length = 4
+}
+
+resource "aws_s3_bucket" "lab" {
+  bucket = "${var.bucket_name_prefix}-${random_id.suffix.hex}"
+
+  tags = {
+    Name        = "tfcloud-sesion06"
+    Environment = "training"
+    ManagedBy   = "HCP-Terraform"
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "lab" {
+  bucket = aws_s3_bucket.lab.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "lab" {
+  bucket = aws_s3_bucket.lab.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+output "bucket_name" {
+  description = "Nombre del bucket privado creado en el laboratorio"
+  value       = aws_s3_bucket.lab.bucket
+}
+
+output "bucket_arn" {
+  description = "ARN del bucket creado"
+  value       = aws_s3_bucket.lab.arn
+}
+```
+
+Crea además un archivo `.gitignore` para evitar añadir artefactos locales o credenciales:
+
+```gitignore
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+crash.log
+crash.*.log
+```
+
+No añadas archivos que contengan tokens, credenciales ni state. La configuración no necesita un archivo de credenciales AWS.
+
+## Paso 5. Inicializar y conectar el directorio al workspace
+
+Desde la raíz de tu clon local, ejecuta:
+
+```bash
+cd 08-terraform-cloud/06-aws-s3
+terraform version
+terraform login
+terraform init
+terraform fmt
+terraform validate
+```
+
+1. Verifica que `terraform version` muestre una versión compatible con `required_version`.
+2. `terraform init` descargará los providers y conectará el directorio con el workspace remoto.
+3. Si aparece un error de versión, proveedor o workspace, corrige el problema antes de continuar.
+
+## Paso 6. Revisar el plan remoto
+
+Ejecuta:
+
+```bash
+terraform plan
+```
+
+1. Abre el workspace en HCP Terraform y entra a **Runs**.
+2. Abre el run y revisa las acciones propuestas.
+3. Comprueba que se crearán el bucket, el bloqueo de acceso público y la configuración de cifrado.
+4. Si aparece `AccessDenied`, no amplíes permisos a administrador por ensayo y error. Revisa el ARN del rol, la condición OIDC, la región y la política IAM.
+5. Si el plan es correcto, continúa con el apply.
+
+## Paso 7. Aplicar y verificar en AWS
+
+Ejecuta:
+
+```bash
+terraform apply
+```
+
+Revisa el plan que presenta Terraform y escribe `yes` solo si las acciones son las esperadas. La operación se ejecutará remotamente en HCP Terraform.
+
+Después:
+
+1. En HCP Terraform, comprueba que el run finalizó correctamente.
+2. Copia el valor de salida `bucket_name` (no contiene secretos).
+3. En la consola AWS, abre **S3** y verifica que el bucket exista.
+4. En la pestaña de permisos, confirma que el bloqueo de acceso público esté habilitado.
+5. En las propiedades del bucket, verifica que el cifrado predeterminado esté habilitado.
+6. Comprueba en HCP Terraform que el state remoto registra los recursos creados.
+
+No configures el bucket como público ni subas datos reales.
+
+## Paso 8. Hacer un cambio controlado
+
+Añade una etiqueta adicional al bloque `tags` del bucket:
+
+```hcl
+CostCenter = "training"
+```
+
+Guarda el archivo y ejecuta:
+
+```bash
+terraform fmt
+terraform plan
+terraform apply
+```
+
+Comprueba que el plan propone actualizar etiquetas sin reemplazar el bucket. Revisa el resultado del run en HCP Terraform.
+
+## Paso 9. Destruir los recursos del laboratorio
+
+Al terminar, ejecuta:
+
+```bash
+terraform destroy
+```
+
+Revisa el plan de destrucción y escribe `yes` solo si corresponde a los recursos de este laboratorio. Luego verifica en la consola S3 que el bucket ya no exista. Si AWS indica que el bucket no está vacío, revisa su contenido y elimina únicamente los objetos de prueba del laboratorio según las indicaciones del instructor; no borres datos ajenos.
+
+Después de confirmar que ya no necesitas el laboratorio, el administrador puede retirar los permisos de creación que concedió al rol y eliminar el rol/proveedor OIDC solo si no lo utiliza ningún otro workspace.
+
+## Criterios de aceptación
+
+- [ ] HCP Terraform ejecutó el plan y el apply de forma remota.
+- [ ] La autenticación a AWS se realizó mediante OIDC y credenciales temporales.
+- [ ] No se almacenaron access keys permanentes en el workspace ni en Git.
+- [ ] El bucket tiene bloqueo de acceso público y cifrado predeterminado.
+- [ ] El state está en HCP Terraform.
+- [ ] Se aplicó una actualización de etiquetas sin reemplazar el bucket.
+- [ ] Se destruyeron los recursos al finalizar.
+
+## Preguntas de revisión
+
+1. ¿Qué diferencia hay entre las credenciales temporales OIDC y las access keys estáticas?
+2. ¿Por qué la trust policy debe restringir el workspace que puede asumir el rol?
+3. ¿Qué ventajas aporta el state remoto al trabajo en equipo?
+4. ¿Por qué revisamos el plan antes de aprobar el apply?
+5. ¿Qué permisos mínimos necesitó el rol y cuáles retirarías al finalizar?
+
+## Referencias oficiales
+
+- [HCP Terraform — AWS dynamic credentials](https://developer.hashicorp.com/terraform/cloud-docs/dynamic-provider-credentials/aws-configuration)
+- [HCP Terraform — AWS Quick Setup](https://developer.hashicorp.com/terraform/cloud-docs/dynamic-provider-credentials/aws-configuration/quick-setup)
+- [HCP Terraform — Dynamic provider credentials](https://developer.hashicorp.com/terraform/cloud-docs/dynamic-provider-credentials)
+- [AWS — Crear un proveedor OIDC en IAM](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_create_oidc.html)
+- [AWS Provider — documentación](https://registry.terraform.io/providers/hashicorp/aws/latest/docs)
+
+
 ## Documentación oficial
 
 - [HCP Terraform](https://developer.hashicorp.com/terraform/cloud-docs)
