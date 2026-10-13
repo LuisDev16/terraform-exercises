@@ -1,218 +1,744 @@
-# Sesión 04 — Colaboración con Terraform Cloud
+# Sesión 04 — Colaboración con Terraform Cloud (HCP Terraform)
 
-Cinco laboratorios progresivos sobre Terraform Cloud (HCP Terraform). El foco está en workspaces, Remote State, integración VCS, variables sensibles, ejecución remota y automatización de runs.
+Esta sesión es **guiada**: sigue los pasos en orden, copia los ejemplos, ejecuta los comandos y comprueba cada resultado antes de avanzar. No necesitas desplegar infraestructura cloud en los ejercicios 1 y 2; se utiliza el provider `random` para practicar con seguridad.
 
-> **Requisitos:** cuenta en HCP Terraform, GitHub y, para ejercicios con proveedores, una cuenta cloud de laboratorio con permisos mínimos. Revisa límites y funcionalidades de tu plan antes de la clase; algunos nombres de menús pueden cambiar.
->
-> **Seguridad:** no subas credenciales al repositorio ni pegues secretos en archivos `.tfvars`, commits, capturas o logs. Usa variables sensibles de workspace o un método de autenticación recomendado para el proveedor. No ejecutes cambios sobre recursos productivos.
+## Requisitos previos
 
-## Ruta de aprendizaje
+- Git instalado y Terraform CLI instalado (`terraform version`).
+- Cuenta en [HCP Terraform](https://app.terraform.io/) y acceso a una organización.
+- Cuenta de GitHub y permiso para instalar/conectar la integración VCS en el ejercicio 3.
+- Para esta sesión no se necesitan credenciales de AWS/Azure/GCP.
+- Crea una carpeta de trabajo fuera de otros proyectos. No subas archivos de state, tokens ni credenciales a Git.
 
-| Ejercicio | Tema | Tiempo sugerido | Resultado |
-|---|---|---:|---|
-| 1 | Workspace y Remote State | 20 min | Estado almacenado en HCP Terraform |
-| 2 | Migración del estado local | 25 min | Migración controlada y verificada |
-| 3 | VCS-driven workflow | 30 min | Plan por cambio en GitHub y apply tras aprobación |
-| 4 | Variables y datos sensibles | 25 min | Configuración parametrizada sin secretos en Git |
-| 5 | Run Triggers y colaboración entre workspaces | 30 min | Flujo de ejecución entre workspaces |
+**Duración sugerida:** 2 h 30 min. **Objetivo:** practicar workspaces, state remoto, migración, VCS-driven workflow, variables seguras y Run Triggers.
 
-Tiempo total estimado: 2 h 10 min.
+## Mapa de ejercicios
 
----
-
-# Ejercicio 1 — Crear un workspace y usar Remote State
-
-**Nivel:** básico  
-**Objetivo:** entender qué representa un workspace de HCP Terraform, cómo se asocia a una configuración y dónde queda el estado remoto.
-
-### Escenario
-Un equipo tiene Terraform instalado en las laptops de sus integrantes. Cada persona ejecuta `terraform apply` y termina con un estado distinto o desactualizado. El equipo debe centralizar la gestión del estado.
-
-### Retos
-1. Inicia sesión en HCP Terraform y crea una organización o utiliza la organización del laboratorio.
-2. Crea un workspace llamado `sesion04-01-remote-state` con flujo **CLI-driven**.
-3. En una carpeta local, crea una configuración Terraform mínima que no despliegue recursos cloud. Usa el provider `random` y el recurso `random_pet` para generar un valor de laboratorio.
-4. Configura el backend de HCP Terraform con el bloque `cloud` y el nombre de organización/workspace adecuados.
-5. Ejecuta `terraform login`, `terraform init`, `terraform plan` y `terraform apply`.
-6. Verifica el run y el state desde la UI de HCP Terraform.
-7. Cambia un atributo del recurso y observa el nuevo plan.
-
-### Criterios de aceptación
-- El workspace aparece en HCP Terraform y está asociado a la configuración CLI.
-- El plan y el apply quedan registrados en el historial de runs.
-- El alumno explica la diferencia entre el directorio local, el workspace y el state remoto.
-- No se requiere crear infraestructura facturable en un proveedor cloud.
-
-### Preguntas de revisión
-- ¿Qué información vive en el state?
-- ¿Qué riesgo reduce el state remoto?
-- ¿El state remoto reemplaza el control de versiones del código?
-
-**Entregable:** captura del workspace y explicación de dónde se consulta el último run y el state.
+| # | Ejercicio | Duración |
+|---|---|---:|
+| 1 | Crear workspace CLI-driven y centralizar el state | 25 min |
+| 2 | Migrar state local existente a HCP Terraform | 25 min |
+| 3 | Conectar GitHub con VCS-driven workflow | 35 min |
+| 4 | Configurar variables y valores sensibles | 25 min |
+| 5 | Compartir outputs y configurar Run Triggers | 40 min |
 
 ---
 
-# Ejercicio 2 — Migrar el estado local a HCP Terraform
+# Ejercicio 1 — Crear un workspace y centralizar el state
 
-**Nivel:** intermedio  
-**Objetivo:** practicar una migración deliberada del estado local a un workspace remoto, sin perder el seguimiento de los recursos.
+**Qué aprenderás:** crear un workspace CLI-driven, conectar el CLI con HCP Terraform y revisar los runs y el state desde la web.
 
-### Escenario
-Ya existe una configuración Terraform que administra un recurso de laboratorio y el state se guarda localmente. El equipo quiere pasar a HCP Terraform para compartir operaciones y estado.
+## Paso 1. Crear el workspace en HCP Terraform
 
-### Preparación
-Usa un directorio independiente del ejercicio 1. Crea un recurso inocuo, como `random_pet`, y ejecuta un apply local para crear el archivo `terraform.tfstate`.
+1. Abre [HCP Terraform](https://app.terraform.io/) e inicia sesión.
+2. Entra a tu organización. Si no tienes una, crea una según las opciones disponibles para tu cuenta.
+3. Selecciona **Workspaces** y crea un workspace nuevo.
+4. Elige el flujo **CLI-driven workflow** (no VCS-driven en este ejercicio).
+5. Ponle el nombre `sesion04-01-remote-state` y crea el workspace.
+6. Deja abierta la página del workspace. La necesitarás para verificar los resultados.
 
-### Retos
-1. Registra el estado inicial con `terraform state list` y `terraform state show`.
-2. Crea un workspace CLI-driven nuevo: `sesion04-02-migration`.
-3. Añade la configuración `cloud` para apuntar al workspace.
-4. Lee la salida de `terraform init` y acepta la migración del state cuando Terraform la solicite.
-5. Revisa el estado remoto en la UI y compara los recursos gestionados antes y después.
-6. Ejecuta `terraform plan` sin cambiar la configuración. El resultado esperado es que no haya cambios.
-7. Documenta cómo recuperarías el archivo de state antes de una migración, sin compartirlo ni subirlo al repo.
+## Paso 2. Crear una configuración local
 
-### Criterios de aceptación
-- El state queda asociado al workspace esperado.
-- El recurso existente sigue gestionado por Terraform; no se recrea sin motivo.
-- Un plan posterior a la migración no muestra cambios inesperados.
-- El alumno diferencia **migrar el state** de **importar recursos existentes**.
+En una terminal, ejecuta:
 
-### Preguntas de revisión
-- ¿Por qué conviene hacer una copia de seguridad antes de mover el state?
-- ¿Qué revisarías si el plan propone destruir y recrear el recurso?
-- ¿Por qué no se debe guardar `terraform.tfstate` en Git?
+```bash
+mkdir -p terraform-cloud-labs/ejercicio-01
+cd terraform-cloud-labs/ejercicio-01
+```
 
-**Entregable:** salida resumida de `terraform state list` antes/después y explicación del plan de verificación.
+Crea `main.tf` con este contenido. Reemplaza `MI_ORGANIZACION` por el nombre exacto de tu organización en HCP Terraform.
 
----
+```hcl
+terraform {
+  required_version = ">= 1.5.0"
 
-# Ejercicio 3 — Conectar GitHub y habilitar VCS-driven workflow
+  cloud {
+    organization = "MI_ORGANIZACION"
 
-**Nivel:** intermedio  
-**Objetivo:** automatizar los runs a partir de cambios en el control de versiones y aplicar cambios solamente después de revisar el plan.
+    workspaces {
+      name = "sesion04-01-remote-state"
+    }
+  }
 
-### Escenario
-El equipo quiere que los cambios enviados a una rama generen un plan verificable, mientras que los cambios aprobados en la rama principal puedan desplegarse con controles.
+  required_providers {
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
+  }
+}
 
-### Retos
-1. Crea una carpeta `08-terraform-cloud/03-vcs-workflow` en tu fork o rama de laboratorio con una configuración Terraform mínima basada en `random_pet`.
-2. Crea un workspace llamado `sesion04-03-vcs` con workflow basado en VCS y conéctalo a GitHub mediante la integración disponible en HCP Terraform.
-3. Configura el repositorio y el directorio de trabajo correctos.
-4. Realiza un commit que cambie el nombre o los atributos del recurso. Verifica que se origine un run.
-5. Crea una rama para un segundo cambio y observa el plan que se genera para ese cambio.
-6. Revisa el plan antes de confirmar cualquier apply. Configura el workspace para que requiera aprobación manual cuando sea compatible con el flujo elegido.
-7. Documenta el recorrido desde el commit hasta el plan, aprobación y resultado.
+resource "random_pet" "demo" {
+  length    = 2
+  separator = "-"
+}
 
-### Criterios de aceptación
-- Un commit en la ruta correcta dispara un run.
-- La configuración del workspace apunta al repositorio y directorio esperados.
-- Se identifica el commit relacionado con cada run.
-- No se aprueba un plan sin revisar las acciones propuestas.
+output "nombre_generado" {
+  description = "Valor aleatorio generado por Terraform para el laboratorio"
+  value       = random_pet.demo.id
+}
+```
 
-### Preguntas de revisión
-- ¿Qué diferencia hay entre CLI-driven y VCS-driven?
-- ¿Qué debería suceder cuando falla el plan?
-- ¿Por qué una aprobación humana no sustituye la revisión de código?
+## Paso 3. Autenticar el CLI e inicializar
 
-**Entregable:** URL del workspace y commit que disparó un run, más un diagrama sencillo del flujo.
+Ejecuta estos comandos desde `ejercicio-01`:
 
----
+```bash
+terraform login
+terraform init
+```
 
-# Ejercicio 4 — Variables, variables sensibles y configuración por entorno
+- `terraform login` abre el flujo para crear/guardar un token de usuario de Terraform en tu equipo. No compartas el token ni lo guardes en el repositorio.
+- `terraform init` descarga el provider `random` y conecta el directorio con el workspace remoto.
+- Si aparece un error de organización o workspace, comprueba el nombre exacto en `main.tf` y que tu usuario tenga acceso.
 
-**Nivel:** intermedio  
-**Objetivo:** mover la configuración fuera del código y comprender cómo proteger valores sensibles en HCP Terraform.
+## Paso 4. Ejecutar el primer plan y apply
 
-### Escenario
-La misma configuración se utilizará en `dev` y `qa`. Los valores de configuración no deben quedar fijados en el código y las credenciales no pueden almacenarse en Git.
+```bash
+terraform fmt
+terraform validate
+terraform plan
+terraform apply
+```
 
-### Retos
-1. Usa una configuración Terraform sencilla con variables tipadas:
-   - `project_name` (`string`)
-   - `environment` (`string`, validación para `dev`, `qa` o `prod`)
-   - `resource_count` (`number`, con validación de rango)
-   - `tags` (`map(string)`)
-2. Expón outputs descriptivos para comprobar los valores introducidos. Evita outputs que revelen secretos.
-3. Crea variables de workspace desde la UI: algunas como variables Terraform y otras como variables de entorno.
-4. Marca como sensibles los valores de prueba que lo requieran. Si se integra un provider cloud, usa el método de autenticación admitido y recomendado para dicho provider.
-5. Ejecuta un plan con `dev` y después con `qa`, usando workspaces separados o una estrategia de entorno claramente documentada.
-6. Comprueba cómo aparecen los valores sensibles en la UI y qué se oculta en logs/outputs.
-7. Intenta introducir un valor inválido para `environment` y verifica que la validación detenga la ejecución.
+Cuando Terraform pregunte si deseas continuar, escribe `yes`. El recurso `random_pet` solo genera un valor en el state; no crea recursos en AWS, Azure ni GCP.
 
-### Criterios de aceptación
-- Las variables tienen tipos, descripción y validación.
-- Separa claramente variables Terraform de variables de entorno.
-- Ninguna credencial está en el repositorio ni en archivos versionados.
-- Una configuración inválida falla antes de intentar crear recursos.
-- Los outputs no filtran valores sensibles.
+## Paso 5. Comprobar el resultado en la UI
 
-### Preguntas de revisión
-- ¿Qué cambia al marcar una variable como sensible?
-- ¿Por qué “sensitive” no es una solución para almacenar secretos en el código?
-- ¿Qué diferencias tiene una variable de workspace frente a una variable definida en `.tf`?
+1. Regresa a `sesion04-01-remote-state` en HCP Terraform.
+2. Abre **Runs** y verifica que exista un run asociado a tu ejecución.
+3. Abre **States** o la sección de state disponible en el workspace y comprueba que se haya guardado una versión.
+4. Busca el output `nombre_generado` en el resultado del run.
 
-**Entregable:** tabla de variables (nombre, tipo, propósito, ubicación y si es sensible) sin incluir los valores secretos.
+## Paso 6. Provocar un cambio
 
----
+En `main.tf`, cambia `length = 2` por `length = 3`. Ejecuta:
 
-# Ejercicio 5 — Run Triggers y dependencias entre workspaces
+```bash
+terraform plan
+terraform apply
+```
 
-**Nivel:** avanzado  
-**Objetivo:** coordinar la ejecución de configuraciones separadas, utilizando dependencias explícitas entre workspaces.
+Comprueba que se registre otro run y que cambie el valor generado.
 
-### Escenario
-Un equipo gestiona una capa de plataforma y otra de aplicación en workspaces distintos. Cuando cambia la plataforma, el workspace dependiente debe poder iniciar una nueva ejecución para validar la configuración consumidora.
+### Resultado esperado
 
-### Diseño propuesto
-- Workspace A: `sesion04-05-platform`
-- Workspace B: `sesion04-05-app`
+- El workspace tiene al menos un run completado.
+- El state está guardado remotamente.
+- Puedes consultar el output sin depender de que el state esté guardado localmente.
 
-Para evitar crear infraestructura cloud, ambos pueden usar el provider `random`. Representa un identificador de plataforma con un output y consume dicho output en el workspace B mediante un mecanismo de lectura de outputs remotos disponible para la configuración y los permisos del laboratorio.
+### Preguntas
 
-### Retos
-1. Crea los dos workspaces y sus configuraciones independientes.
-2. En A, define un valor de plataforma y publícalo como output no sensible.
-3. Configura B para leer el output de A con acceso limitado al workspace productor. No compartas tokens de usuario ni permisos excesivos.
-4. Verifica que B pueda leer el output sin copiarlo manualmente.
-5. Configura un Run Trigger desde A hacia B en la UI de HCP Terraform, siguiendo las funciones que estén disponibles en tu plan.
-6. Ejecuta un cambio en A. Observa el resultado del run y comprueba si el trigger inicia un run en B.
-7. Cambia la configuración de B y diferencia qué evento originó cada run.
-8. Si el plan o la organización no permite Run Triggers, documenta la limitación y demuestra la dependencia de outputs por separado; no afirmes que existe automatización si no se ejecutó.
-
-### Criterios de aceptación
-- Las responsabilidades de los dos workspaces están separadas.
-- B consume un output de A mediante permisos explícitos.
-- Se identifica el evento que inicia cada run.
-- No se exponen outputs sensibles ni se conceden privilegios innecesarios.
-- Se documenta el comportamiento observado y cualquier limitación del plan.
-
-### Preguntas de revisión
-- ¿Qué ventajas tiene dividir el state por capas?
-- ¿Qué acoplamiento introduce depender de outputs remotos?
-- ¿Un Run Trigger equivale a un pipeline genérico de CI/CD?
-
-**Entregable:** diagrama de dependencia A → B, evidencias de runs y descripción de permisos.
+1. ¿Qué diferencia hay entre el workspace de HCP Terraform y la carpeta local?
+2. ¿Qué información registra el state?
+3. ¿El state remoto reemplaza a Git? ¿Por qué?
 
 ---
 
-## Checklist común para todos los laboratorios
+# Ejercicio 2 — Migrar un state local a HCP Terraform
 
-- [ ] Usé un workspace y nombres exclusivos de laboratorio.
-- [ ] Revisé las acciones propuestas en el plan antes de aplicar.
-- [ ] No subí credenciales ni state a Git.
-- [ ] Documenté los cambios y los resultados de los runs.
-- [ ] Destruí los recursos creados, si los hubiera, y confirmé que no quedaron recursos facturables.
-- [ ] Dejé los workspaces de práctica identificados para eliminarlos según las políticas del equipo.
+**Qué aprenderás:** hacer una migración controlada del state local y comprobar que Terraform continúa gestionando el mismo objeto.
 
-## Recursos oficiales
+> Haz este ejercicio en otra carpeta y en otro workspace. No reutilices el state del ejercicio 1.
 
-- [HCP Terraform — documentación](https://developer.hashicorp.com/terraform/cloud-docs)
-- [Workspaces](https://developer.hashicorp.com/terraform/cloud-docs/workspaces)
+## Paso 1. Crear un workspace remoto vacío
+
+1. En HCP Terraform, crea un workspace CLI-driven llamado `sesion04-02-migration`.
+2. No ejecutes ninguna configuración desde la UI; lo conectaremos desde el CLI.
+
+## Paso 2. Crear el state local
+
+Desde una terminal, vuelve al directorio padre y crea una carpeta nueva:
+
+```bash
+cd ..
+mkdir ejercicio-02
+cd ejercicio-02
+```
+
+Crea `main.tf` con esta configuración **sin bloque `cloud` ni backend remoto**:
+
+```hcl
+terraform {
+  required_version = ">= 1.5.0"
+
+  required_providers {
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
+  }
+}
+
+resource "random_pet" "demo" {
+  length    = 2
+  separator = "-"
+}
+
+output "nombre_generado" {
+  value = random_pet.demo.id
+}
+```
+
+Inicializa y aplica localmente:
+
+```bash
+terraform init
+terraform fmt
+terraform validate
+terraform apply
+```
+
+Escribe `yes` cuando se solicite. Confirma que existen state y recurso:
+
+```bash
+terraform state list
+terraform state show random_pet.demo
+```
+
+Antes de migrar, crea una copia de respaldo **fuera del repositorio**:
+
+```bash
+terraform state pull > ../ejercicio-02-state-backup.json
+```
+
+Protege ese archivo como dato sensible y no lo compartas. Si tu shell o sistema requiere otra ubicación, guárdalo en una carpeta privada.
+
+## Paso 3. Añadir la configuración de HCP Terraform
+
+Edita el bloque `terraform` de `main.tf` para que quede así, manteniendo el recurso y el output:
+
+```hcl
+terraform {
+  required_version = ">= 1.5.0"
+
+  cloud {
+    organization = "MI_ORGANIZACION"
+
+    workspaces {
+      name = "sesion04-02-migration"
+    }
+  }
+
+  required_providers {
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
+  }
+}
+```
+
+Sustituye `MI_ORGANIZACION` por tu organización.
+
+## Paso 4. Migrar el state
+
+Ejecuta:
+
+```bash
+terraform login
+terraform init
+```
+
+Terraform detectará que el directorio tiene state local y ahora está configurado para utilizar HCP Terraform. Lee el mensaje cuidadosamente y confirma la migración cuando el CLI lo solicite. **No borres manualmente el state local antes de que la migración termine correctamente.**
+
+Si no aparece la pregunta de migración, detente y revisa que estés en `ejercicio-02`, que el state local exista y que el workspace remoto esté vacío y sea el correcto.
+
+## Paso 5. Validar la migración
+
+```bash
+terraform state list
+terraform plan
+```
+
+Abre el workspace `sesion04-02-migration` en HCP Terraform y verifica el state. El plan no debería proponer cambios en el recurso si la configuración y la migración están correctas.
+
+### Resultado esperado
+
+- El recurso `random_pet.demo` sigue presente en el state.
+- El state está asociado al workspace remoto.
+- Un plan sin cambios de configuración no propone recrear el recurso.
+
+### Preguntas
+
+1. ¿Cuál es la diferencia entre migrar un state e importar un recurso?
+2. ¿Por qué hacemos backup antes de migrar?
+3. ¿Qué harías si el plan propone destruir y recrear el recurso después de migrar?
+
+---
+
+# Ejercicio 3 — Conectar GitHub con VCS-driven workflow
+
+**Qué aprenderás:** vincular un repositorio, definir el directorio de trabajo y disparar runs al cambiar código.
+
+## Paso 1. Crear una carpeta de laboratorio en tu repo
+
+En tu clon local de `terraform-exercises`, crea una rama para la práctica y el directorio:
+
+```bash
+git checkout -b lab/sesion04-terraform-cloud-vcs
+mkdir -p 08-terraform-cloud/03-vcs-workflow
+```
+
+Dentro de `08-terraform-cloud/03-vcs-workflow`, crea `main.tf`:
+
+```hcl
+terraform {
+  required_version = ">= 1.5.0"
+
+  required_providers {
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
+  }
+}
+
+resource "random_pet" "demo" {
+  length    = 2
+  separator = "-"
+}
+
+output "nombre_generado" {
+  value = random_pet.demo.id
+}
+```
+
+Crea también `README.md` con el texto `Laboratorio guiado de VCS-driven workflow para HCP Terraform.`
+
+Guarda los archivos y crea un commit:
+
+```bash
+git add 08-terraform-cloud/03-vcs-workflow
+git commit -m "Add Terraform Cloud VCS lab"
+git push -u origin lab/sesion04-terraform-cloud-vcs
+```
+
+Si el repositorio es un fork, confirma que `origin` apunta a tu fork y no a un repositorio donde no tengas permiso de escritura.
+
+## Paso 2. Conectar GitHub desde HCP Terraform
+
+1. En HCP Terraform, entra a **Settings** de tu organización y localiza **Providers / Version Control** o la sección equivalente de VCS.
+2. Selecciona GitHub y autoriza la aplicación de HCP Terraform siguiendo el flujo de instalación.
+3. Concede acceso solamente al repositorio de laboratorio si la pantalla permite elegir repositorios.
+4. Vuelve a Workspaces y crea un workspace nuevo.
+5. Elige el flujo basado en VCS y selecciona el repositorio `terraform-exercises` (o tu fork).
+6. En la configuración del workspace, establece el **Working Directory** como `08-terraform-cloud/03-vcs-workflow`.
+7. Selecciona la rama `lab/sesion04-terraform-cloud-vcs` si la UI permite definirla como rama de trabajo. Nombra el workspace `sesion04-03-vcs` y termina la creación.
+
+Los nombres exactos de los menús pueden variar según la versión de la UI y el tipo de organización. Si no puedes instalar la integración, pide al administrador de la organización que la habilite; no sustituyas la conexión por un token pegado en el código.
+
+## Paso 3. Verificar el primer run
+
+1. Abre el workspace `sesion04-03-vcs`.
+2. Entra a **Runs** y comprueba si se inició un plan al conectar el repositorio.
+3. Abre el run y revisa el commit, la rama y el resultado del plan.
+4. Como el recurso es `random_pet`, no hay infraestructura cloud que desplegar.
+
+Si no se inicia automáticamente, revisa el Working Directory, la rama configurada, los permisos de GitHub y que `main.tf` esté en la ruta correcta. Puedes iniciar un run manual desde la UI para comprobar que la configuración se pueda ejecutar, pero registra que fue manual.
+
+## Paso 4. Generar un run con un commit
+
+Edita `main.tf` y cambia `length = 2` por `length = 3`. Luego ejecuta:
+
+```bash
+git add 08-terraform-cloud/03-vcs-workflow/main.tf
+git commit -m "Change generated pet length"
+git push
+```
+
+Regresa a **Runs** y localiza el run asociado al nuevo commit. Abre el plan y explica qué va a cambiar.
+
+## Paso 5. Probar una rama o pull request
+
+1. Crea una rama adicional desde tu rama de laboratorio:
+
+```bash
+git checkout -b lab/sesion04-vcs-change-2
+```
+
+2. Cambia el separador de `random_pet.demo` a `_` o modifica `length`.
+3. Haz commit y push de la rama.
+4. Abre un pull request hacia tu rama de laboratorio o hacia la rama que configuraste en el workspace.
+5. Observa si HCP Terraform genera un **speculative plan** para el pull request. El comportamiento depende de la configuración VCS y de las reglas del workspace.
+6. No fusiones el PR hasta haber revisado el diff de Git y el plan de Terraform.
+
+## Paso 6. Revisar el control de apply
+
+En el workspace, revisa la opción de auto-apply. Para esta práctica, mantenla desactivada si está disponible para poder inspeccionar el plan y aprobar el apply manualmente. Si el run de prueba no requiere apply o la configuración de la organización impide esta opción, documenta el comportamiento real observado.
+
+### Resultado esperado
+
+- HCP Terraform está conectado al repositorio.
+- El Working Directory apunta al directorio del ejercicio.
+- Un commit en la rama configurada genera un run relacionado con ese commit.
+- El alumno sabe distinguir un plan normal de un speculative plan.
+
+### Preguntas
+
+1. ¿Qué diferencia hay entre CLI-driven y VCS-driven?
+2. ¿Qué información permite relacionar un run con el código fuente?
+3. ¿Por qué es importante revisar el plan de Terraform y el diff del PR?
+
+---
+
+# Ejercicio 4 — Variables, validaciones y valores sensibles
+
+**Qué aprenderás:** administrar inputs desde HCP Terraform, validar valores y evitar secretos en el código.
+
+## Paso 1. Crear una configuración con variables
+
+Crea `08-terraform-cloud/04-variables/main.tf` en tu clon del repositorio:
+
+```hcl
+terraform {
+  required_version = ">= 1.5.0"
+
+  required_providers {
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
+  }
+}
+
+variable "project_name" {
+  description = "Nombre corto del proyecto"
+  type        = string
+  default     = "curso-terraform"
+}
+
+variable "environment" {
+  description = "Entorno del laboratorio"
+  type        = string
+
+  validation {
+    condition     = contains(["dev", "qa", "prod"], var.environment)
+    error_message = "environment debe ser dev, qa o prod."
+  }
+}
+
+variable "resource_count" {
+  description = "Cantidad de nombres aleatorios que se generarán"
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.resource_count >= 1 && var.resource_count <= 3 && floor(var.resource_count) == var.resource_count
+    error_message = "resource_count debe ser un entero entre 1 y 3."
+  }
+}
+
+variable "tags" {
+  description = "Etiquetas de referencia del laboratorio"
+  type        = map(string)
+  default = {
+    owner = "alumno"
+    lab   = "sesion04"
+  }
+}
+
+variable "demo_sensitive_value" {
+  description = "Valor ficticio para demostrar el tratamiento de variables sensibles; no uses credenciales reales"
+  type        = string
+  sensitive   = true
+}
+
+resource "random_pet" "demo" {
+  count     = var.resource_count
+  length    = 2
+  separator = "-"
+}
+
+output "project_environment" {
+  description = "Proyecto y entorno seleccionado"
+  value       = "${var.project_name}-${var.environment}"
+}
+
+output "generated_names" {
+  description = "Nombres generados para el laboratorio"
+  value       = random_pet.demo[*].id
+}
+
+output "tags_configured" {
+  description = "Etiquetas configuradas"
+  value       = var.tags
+}
+```
+
+## Paso 2. Crear un workspace
+
+1. En HCP Terraform, crea un workspace CLI-driven llamado `sesion04-04-dev`.
+2. Configura el bloque `cloud` en `main.tf` para que apunte a tu organización y a ese workspace. Como este laboratorio utiliza variables de workspace, puedes mantener el bloque `cloud` en la misma configuración.
+3. Ejecuta `terraform login` si todavía no has autenticado el CLI y luego `terraform init`.
+4. Si el workspace está conectado por CLI, desde el directorio `08-terraform-cloud/04-variables` ejecuta los siguientes comandos de formato y validación:
+
+```bash
+terraform fmt
+terraform validate
+```
+
+## Paso 3. Configurar variables en la UI
+
+1. Abre el workspace `sesion04-04-dev` y entra en **Variables**.
+2. Crea una variable de tipo **Terraform** llamada `environment`, con valor `dev`.
+3. Crea una variable Terraform `resource_count` con valor `2`.
+4. Crea una variable Terraform `tags` con valor JSON, por ejemplo:
+
+```json
+{"owner":"alumno","lab":"sesion04","cost-center":"training"}
+```
+
+5. Crea `demo_sensitive_value` como variable Terraform, introduce un valor ficticio que no sea una contraseña real y marca la opción **Sensitive**.
+6. Guarda las variables. No captures ni copies el valor sensible en el entregable.
+7. Ejecuta `terraform plan` y revisa que el run utilice `dev`, cree dos instancias de `random_pet.demo` y no muestre el valor sensible.
+
+**Importante:** si trabajas con un workspace VCS-driven, el plan se dispara desde commits/UI y las variables se administran igualmente desde la sección Variables. No intentes ejecutar `terraform apply` local contra un workspace configurado para un flujo distinto sin entender primero el modo de ejecución.
+
+## Paso 4. Probar la validación
+
+1. Cambia temporalmente la variable `environment` en la UI a `testing`.
+2. Ejecuta un nuevo plan.
+3. Lee el error de validación: debe indicar que solo se aceptan `dev`, `qa` o `prod`.
+4. Devuelve el valor a `dev` para dejar el workspace en estado correcto.
+
+## Paso 5. Comparar entornos
+
+1. Crea otro workspace CLI-driven llamado `sesion04-04-qa`.
+2. Configura la misma organización y el workspace `sesion04-04-qa` en el bloque `cloud` para la copia de configuración que utilizarás con QA.
+3. Define las mismas variables, pero establece `environment = qa` y `resource_count = 1`.
+4. Ejecuta un plan y compara los outputs de ambos workspaces.
+
+### Resultado esperado
+
+- Los inputs se administran desde HCP Terraform y no están fijados todos en el código.
+- El valor inválido es rechazado por la validación.
+- La variable sensible está marcada como tal y no se imprime como output.
+- `dev` y `qa` tienen configuraciones de variables separadas.
+
+### Preguntas
+
+1. ¿Cuál es la diferencia entre una variable Terraform y una variable de entorno?
+2. ¿Qué oculta la marca `sensitive` y qué no soluciona?
+3. ¿Por qué no debemos guardar secretos en `.tfvars` versionados?
+
+---
+
+# Ejercicio 5 — Outputs remotos y Run Triggers entre workspaces
+
+**Qué aprenderás:** separar componentes en workspaces distintos, compartir outputs con permisos y observar una dependencia de ejecución.
+
+> Este ejercicio requiere que la organización y el plan permitan la función de Run Triggers y la lectura de outputs remotos. Si una función no está disponible, completa primero la parte de outputs y registra la limitación sin simular que el trigger funcionó.
+
+## Paso 1. Crear los dos workspaces
+
+En HCP Terraform crea dos workspaces CLI-driven:
+
+- `sesion04-05-platform`
+- `sesion04-05-app`
+
+La idea es que **platform** publique un identificador y **app** lo consuma. No desplegaremos recursos cloud.
+
+## Paso 2. Configurar el workspace platform
+
+Crea `08-terraform-cloud/05-workspaces/platform/main.tf` con este contenido. Reemplaza `MI_ORGANIZACION`:
+
+```hcl
+terraform {
+  required_version = ">= 1.5.0"
+
+  cloud {
+    organization = "MI_ORGANIZACION"
+    workspaces {
+      name = "sesion04-05-platform"
+    }
+  }
+
+  required_providers {
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
+  }
+}
+
+variable "platform_revision" {
+  description = "Revisión lógica de la plataforma para demostrar cambios"
+  type        = string
+  default     = "v1"
+}
+
+resource "random_pet" "platform" {
+  length    = 2
+  separator = "-"
+  keepers = {
+    revision = var.platform_revision
+  }
+}
+
+output "platform_id" {
+  description = "Identificador no sensible publicado por platform"
+  value       = random_pet.platform.id
+}
+
+output "platform_revision" {
+  value = var.platform_revision
+}
+```
+
+Desde esa carpeta, ejecuta `terraform login` si hace falta y luego:
+
+```bash
+terraform init
+terraform fmt
+terraform validate
+terraform plan
+terraform apply
+```
+
+Escribe `yes` para aplicar. Comprueba que `platform_id` aparece como output del workspace.
+
+## Paso 3. Permitir lectura de outputs
+
+1. En HCP Terraform, abre `sesion04-05-platform` y localiza la sección de acceso a outputs/state compartido o **Remote state sharing**.
+2. Configura el acceso para que `sesion04-05-app` pueda leer los outputs de `platform`, si la política y el plan lo permiten.
+3. Concede el mínimo acceso necesario. No compartas tokens personales en el repositorio ni concedas acceso a toda la organización si no hace falta.
+4. Si la UI muestra opciones distintas, consulta la documentación oficial de Remote State y sigue el mecanismo admitido por la organización.
+
+## Paso 4. Configurar el workspace app
+
+Crea `08-terraform-cloud/05-workspaces/app/main.tf`:
+
+```hcl
+terraform {
+  required_version = ">= 1.5.0"
+
+  cloud {
+    organization = "MI_ORGANIZACION"
+    workspaces {
+      name = "sesion04-05-app"
+    }
+  }
+
+  required_providers {
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
+  }
+}
+
+data "terraform_remote_state" "platform" {
+  backend = "remote"
+
+  config = {
+    organization = "MI_ORGANIZACION"
+    workspaces = {
+      name = "sesion04-05-platform"
+    }
+  }
+}
+
+resource "random_pet" "app" {
+  length    = 2
+  separator = "-"
+  keepers = {
+    platform_id = data.terraform_remote_state.platform.outputs.platform_id
+  }
+}
+
+output "platform_id_consumed" {
+  description = "Output que app consume desde platform"
+  value       = data.terraform_remote_state.platform.outputs.platform_id
+}
+
+output "app_id" {
+  value = random_pet.app.id
+}
+```
+
+Reemplaza `MI_ORGANIZACION` en los dos lugares donde aparece. Desde la carpeta `app`, ejecuta:
+
+```bash
+terraform init
+terraform fmt
+terraform validate
+terraform plan
+terraform apply
+```
+
+Si falla la lectura del output, comprueba primero que `platform` tenga un apply completado y que el acceso de outputs remotos esté habilitado para el workspace consumidor. No soluciones el error copiando un token secreto al código.
+
+## Paso 5. Configurar un Run Trigger
+
+1. En HCP Terraform, abre el workspace `sesion04-05-app`.
+2. Localiza **Settings** y la sección **Run Triggers** (el menú puede variar).
+3. Añade `sesion04-05-platform` como workspace que puede disparar ejecuciones de `app`, si esta opción está disponible.
+4. Guarda la configuración y vuelve a `platform`.
+5. Cambia `platform_revision` de `v1` a `v2`. Puedes hacerlo mediante una variable de workspace si decides definirla allí; si no, cambia el `default` en el código.
+6. Ejecuta un nuevo plan y apply de `platform`.
+7. Abre Runs en `app` y comprueba si el cambio de `platform` inició un run en el workspace dependiente. Anota el origen y el resultado.
+
+Un Run Trigger inicia una ejecución en el workspace dependiente; no equivale a una garantía de que todos los cambios se apliquen automáticamente. Revisa siempre el plan y el control de aprobación configurado.
+
+## Paso 6. Dibujar el flujo y validar
+
+Documenta el flujo:
+
+```text
+Cambio de configuración en platform
+              |
+              v
+     Run en platform
+              |
+              v
+     Run Trigger (si está habilitado)
+              |
+              v
+         Run en app
+              |
+              v
+  app lee output de platform
+```
+
+### Resultado esperado
+
+- `platform` publica un output no sensible.
+- `app` consume ese output sin copiar manualmente el valor.
+- El acceso está limitado al workspace necesario.
+- El alumno puede mostrar si el Run Trigger se ejecutó realmente o explicar qué limitación lo impidió.
+
+### Preguntas
+
+1. ¿Qué ventajas tiene dividir una plataforma en varios workspaces?
+2. ¿Qué dependencia y acoplamiento genera `terraform_remote_state`?
+3. ¿Qué diferencia hay entre compartir outputs y disparar un run?
+
+---
+
+## Checklist final del alumno
+
+- [ ] Puedo explicar qué es un workspace y dónde se almacena el state remoto.
+- [ ] Migré state local y comprobé que el plan no tuviera cambios inesperados.
+- [ ] Conecté GitHub y relacioné un run con un commit.
+- [ ] Configuré variables tipadas y una variable sensible sin revelar su valor.
+- [ ] Probé el consumo de outputs entre workspaces y registré el resultado del Run Trigger.
+- [ ] No subí tokens, credenciales ni archivos de state al repositorio.
+- [ ] Eliminé los workspaces temporales según las indicaciones del instructor cuando ya no sean necesarios.
+
+## Limpieza de los laboratorios
+
+Los ejercicios 1, 2 y 4 usan recursos del provider `random`, no recursos de infraestructura cloud. Para quitar los recursos gestionados, entra al directorio de cada workspace CLI-driven y ejecuta `terraform destroy` si el flujo y la configuración siguen disponibles. Confirma el plan antes de escribir `yes`.
+
+Para los workspaces VCS-driven, revisa primero las opciones de destrucción disponibles en la UI. No elimines el workspace hasta confirmar que ya no lo necesitas y que el state se ha tratado según las políticas de tu equipo. Elimina ramas de prueba y carpetas locales cuando hayas entregado las evidencias. Nunca borres un state a mano como sustituto de `destroy`.
+
+## Documentación oficial
+
+- [HCP Terraform](https://developer.hashicorp.com/terraform/cloud-docs)
 - [CLI-driven workflow](https://developer.hashicorp.com/terraform/cloud-docs/run/cli)
 - [VCS-driven workflow](https://developer.hashicorp.com/terraform/cloud-docs/run/ui)
-- [Variables](https://developer.hashicorp.com/terraform/cloud-docs/workspaces/variables)
-- [Remote state](https://developer.hashicorp.com/terraform/cloud-docs/workspaces/state)
-- [Run triggers](https://developer.hashicorp.com/terraform/cloud-docs/workspaces/run-triggers)
+- [Variables de workspace](https://developer.hashicorp.com/terraform/cloud-docs/workspaces/variables)
+- [State y workspaces](https://developer.hashicorp.com/terraform/cloud-docs/workspaces/state)
+- [Run Triggers](https://developer.hashicorp.com/terraform/cloud-docs/workspaces/run-triggers)
 
-> Nota docente: HCP Terraform y sus planes pueden cambiar en características, límites y nombres de interfaz. Verifica la disponibilidad de VCS, variables sensibles, outputs remotos y Run Triggers en la organización utilizada para el curso.
+> **Nota del instructor:** los nombres de opciones y las capacidades disponibles dependen de la versión de HCP Terraform, permisos y plan de la organización. Verifica las pantallas antes de dictar la sesión. No uses credenciales productivas en estos laboratorios.
