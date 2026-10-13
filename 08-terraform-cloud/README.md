@@ -12,6 +12,22 @@ Esta sesión es **guiada**: sigue los pasos en orden, copia los ejemplos, ejecut
 
 **Duración sugerida:** 2 h 30 min. **Objetivo:** practicar workspaces, state remoto, migración, VCS-driven workflow, variables seguras y Run Triggers.
 
+
+
+## Versión de Terraform utilizada
+
+Esta guía está preparada para **Terraform CLI 1.16.5**, la versión estable más reciente verificada para esta actualización. La versión 1.17 aparece como prerelease en el catálogo oficial, así que no se utiliza para el laboratorio. Consulta [HashiCorp Releases](https://releases.hashicorp.com/terraform/) y la [página oficial de instalación](https://developer.hashicorp.com/terraform/install) antes de impartir la sesión por si se publica un parche más reciente.
+
+En todos los bloques HCL, `required_version = "~> 1.16.5"` permite Terraform 1.16.5 y parches compatibles de la rama 1.16, sin saltar automáticamente a una nueva minor.
+
+Comprueba tu versión local:
+
+```bash
+terraform version
+```
+
+En cada workspace de HCP Terraform, abre **Settings** y revisa la versión de Terraform configurada para las ejecuciones remotas. Selecciona **1.16.5** (o la versión estable parcheada que se acuerde para el curso) para que coincida con la restricción del código. No selecciones una versión beta, alpha o RC para esta práctica.
+
 ## Mapa de ejercicios
 
 | # | Ejercicio | Duración |
@@ -50,7 +66,7 @@ Crea `main.tf` con este contenido. Reemplaza `MI_ORGANIZACION` por el nombre exa
 
 ```hcl
 terraform {
-  required_version = ">= 1.5.0"
+  required_version = "~> 1.16.5"
 
   cloud {
     organization = "MI_ORGANIZACION"
@@ -160,7 +176,7 @@ Crea `main.tf` con esta configuración **sin bloque `cloud` ni backend remoto**:
 
 ```hcl
 terraform {
-  required_version = ">= 1.5.0"
+  required_version = "~> 1.16.5"
 
   required_providers {
     random = {
@@ -210,7 +226,7 @@ Edita el bloque `terraform` de `main.tf` para que quede así, manteniendo el rec
 
 ```hcl
 terraform {
-  required_version = ">= 1.5.0"
+  required_version = "~> 1.16.5"
 
   cloud {
     organization = "MI_ORGANIZACION"
@@ -284,7 +300,7 @@ Dentro de `08-terraform-cloud/03-vcs-workflow`, crea `main.tf`:
 
 ```hcl
 terraform {
-  required_version = ">= 1.5.0"
+  required_version = "~> 1.16.5"
 
   required_providers {
     random = {
@@ -392,7 +408,7 @@ Crea `08-terraform-cloud/04-variables/main.tf` en tu clon del repositorio:
 
 ```hcl
 terraform {
-  required_version = ">= 1.5.0"
+  required_version = "~> 1.16.5"
 
   required_providers {
     random = {
@@ -545,7 +561,7 @@ Crea `08-terraform-cloud/05-workspaces/platform/main.tf` con este contenido. Ree
 
 ```hcl
 terraform {
-  required_version = ">= 1.5.0"
+  required_version = "~> 1.16.5"
 
   cloud {
     organization = "MI_ORGANIZACION"
@@ -611,7 +627,7 @@ Crea `08-terraform-cloud/05-workspaces/app/main.tf`:
 
 ```hcl
 terraform {
-  required_version = ">= 1.5.0"
+  required_version = "~> 1.16.5"
 
   cloud {
     organization = "MI_ORGANIZACION"
