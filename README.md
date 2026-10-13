@@ -38,3 +38,9 @@ Los laboratorios multicloud implementan el mismo patrón lógico en AWS y Azure.
 ## Costos
 
 No utilizar VMs no significa costo cero. Revisar pricing/free tier vigente antes de aplicar y destruir los recursos al terminar.
+
+## Sesión 04 — Colaboración con Terraform Cloud
+
+Cinco laboratorios progresivos de HCP Terraform: workspace y Remote State, migración del state local, workflow basado en VCS con GitHub, variables seguras por entorno y Run Triggers entre workspaces.
+
+➡️ [Ver los ejercicios de la sesión 04](08-terraform-cloud/README.md)
