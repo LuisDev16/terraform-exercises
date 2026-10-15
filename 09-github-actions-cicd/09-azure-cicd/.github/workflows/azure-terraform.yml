@@ -1,0 +1,76 @@
+name: Azure Terraform
+
+on:
+  pull_request:
+    paths:
+      - "09-github-actions-cicd/09-azure-cicd/**"
+  push:
+    branches: [main]
+    paths:
+      - "09-github-actions-cicd/09-azure-cicd/**"
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Operation to execute"
+        required: true
+        type: choice
+        options: [apply, destroy]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: azure-terraform-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate-plan:
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: 09-github-actions-cicd/09-azure-cicd
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.14.0"
+      - uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ vars.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ vars.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ vars.AZURE_TENANT_ID }}"}'
+      - run: terraform fmt -check -recursive
+      - run: terraform init
+      - run: terraform validate
+      - name: Terraform plan
+        run: terraform plan -no-color -input=false -var="subscription_id=${{ vars.AZURE_SUBSCRIPTION_ID }}"
+
+  deploy:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: 09-github-actions-cicd/09-azure-cicd
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.14.0"
+      - uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ vars.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ vars.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ vars.AZURE_TENANT_ID }}"}'
+      - run: terraform fmt -check -recursive
+      - run: terraform init
+      - run: terraform validate
+      - name: Plan apply
+        if: inputs.action == 'apply'
+        run: terraform plan -out=tfplan -var="subscription_id=${{ vars.AZURE_SUBSCRIPTION_ID }}"
+      - name: Apply
+        if: inputs.action == 'apply'
+        run: terraform apply -auto-approve tfplan
+      - name: Destroy plan
+        if: inputs.action == 'destroy'
+        run: terraform plan -destroy -out=tfplan -var="subscription_id=${{ vars.AZURE_SUBSCRIPTION_ID }}"
+      - name: Destroy
+        if: inputs.action == 'destroy'
+        run: terraform apply -auto-approve tfplan
