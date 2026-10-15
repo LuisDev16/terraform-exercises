@@ -1,61 +1,80 @@
-# Ejercicio 11 — CI/CD en Google Cloud con GitHub Actions y Terraform
+# Ejercicio 11 — Google Cloud: GitHub Actions + Terraform Cloud
 
 ## Objetivo
 
-Crear un bucket privado de Cloud Storage usando Terraform y GitHub Actions. En esta primera versión se utilizan credenciales de service account almacenadas en GitHub Secrets. En una siguiente versión se puede migrar a Workload Identity Federation.
+Crear un bucket de Cloud Storage privado con Terraform. GitHub Actions valida el código y HCP Terraform ejecuta los runs, administra el state remoto y requiere confirmación manual para apply. **En esta versión no se usa autenticación federada.**
 
-## 1. Requisitos
+## Flujo
 
-- Proyecto de Google Cloud con facturación habilitada.
-- APIs de Cloud Storage y IAM habilitadas.
-- Permisos para crear un service account y asignarle roles.
-- Un service account dedicado al laboratorio.
+`Pull Request → GitHub Actions (fmt/checks) → HCP Terraform speculative plan → merge a main → HCP Terraform plan → aprobación manual → apply`
 
-## 2. Crear service account y clave JSON
+## 1. Crear un service account para el ejercicio
 
-En Google Cloud Console → IAM & Admin → Service Accounts, crea por ejemplo `github-terraform-lab`.
+En Google Cloud Console crea un service account dedicado al laboratorio. Asígnale los permisos mínimos para crear, consultar y eliminar buckets en el proyecto de práctica. Para un proyecto aislado puede usarse temporalmente `roles/storage.admin`, aunque es un rol amplio; no uses Owner ni Editor.
 
-Concede los permisos necesarios para crear, consultar y eliminar buckets de Cloud Storage en el proyecto de laboratorio. `Storage Admin` (`roles/storage.admin`) es un rol amplio, así que úsalo solo en un proyecto aislado para esta práctica; no concedas Owner ni Editor al service account.
+Crea una clave JSON solo si las políticas de la organización permiten este método. Guarda el archivo en un lugar seguro y **no** lo agregues al repositorio.
 
-Crea una clave JSON para el service account. Descárgala y guárdala temporalmente en un lugar seguro. No la subas al repositorio.
+## 2. Configurar credenciales en HCP Terraform
 
-En GitHub → Settings → Secrets and variables → Actions → Secrets configura:
-- `GCP_CREDENTIALS_JSON`: pega el contenido completo del JSON de la clave, incluyendo llaves y comillas.
+En el workspace, ve a **Variables** y añade:
+- `GOOGLE_CREDENTIALS`: variable de entorno sensible con el contenido completo del JSON.
+- `GOOGLE_PROJECT`: ID del proyecto, como variable de entorno o variable Terraform `project_id`.
+- `GOOGLE_REGION`: región de laboratorio, si quieres reemplazar el valor predeterminado.
 
-En Variables configura:
-- `GCP_PROJECT_ID`: ID del proyecto.
-- `GCP_REGION`: por ejemplo `us-central1`.
+HCP Terraform debe recibir el JSON completo en `GOOGLE_CREDENTIALS`, no una ruta local del archivo. Limita las credenciales al proyecto de laboratorio y revoca/elimina la clave al finalizar. Si tu organización prohíbe claves de service account, detente aquí y sustituye esta sección por Workload Identity Federation en una siguiente versión.
 
-> Las claves JSON son credenciales de larga duración. Limita la clave a este laboratorio, no la compartas con alumnos y elimínala al finalizar. Si la política de la organización prohíbe claves de service account, no uses esta variante: implementa Workload Identity Federation.
+## 3. Crear el workspace VCS-driven
 
-## 3. Qué crea Terraform
+1. En HCP Terraform crea `gha-gcp-cicd`.
+2. Conecta el repositorio `aldo2510/terraform-exercises`.
+3. Selecciona `main` y define el working directory `09-github-actions-cicd/11-gcp-cicd`.
+4. Desactiva Auto Apply para inspeccionar el plan.
+5. Comprueba que no se haya configurado un backend GCS dentro del código: HCP Terraform administrará el state remoto.
 
-Un bucket de Cloud Storage con:
-- acceso público prevenido,
+## 4. Recursos creados
+
+El ejercicio crea un bucket de Cloud Storage con:
+- prevención de acceso público,
 - uniform bucket-level access,
-- versionado de objetos,
-- etiqueta que indica que lo administra Terraform.
+- versionado,
+- etiquetas para identificar la infraestructura de laboratorio.
 
-El nombre incorpora el ID del proyecto y un prefijo configurable.
+El nombre del bucket debe ser único globalmente. Usa un proyecto dedicado y revisa siempre el plan.
 
-## 4. Ejecutar CI
+## 5. CI con GitHub Actions
 
-Abre un pull request modificando una variable o tag. GitHub Actions ejecuta `terraform fmt -check`, `init`, `validate` y `plan`; no hace apply automáticamente.
+El workflow `.github/workflows/gcp-terraform.yml` ejecuta `terraform fmt -check`, `terraform init -backend=false` y `terraform validate`. Las credenciales no se necesitan en el runner, ya que HCP Terraform gestiona la ejecución real y la autenticación del provider.
 
-## 5. Desplegar y destruir
+## 6. Completar el ciclo
 
-Después de integrar en `main`, abre **Actions → GCP Terraform → Run workflow** y elige `apply` o `destroy`. Configura el environment `production` con required reviewers para añadir una aprobación manual.
+1. Abre una rama y realiza un cambio pequeño.
+2. Crea un pull request hacia `main`.
+3. Comprueba el workflow en GitHub Actions y revisa el speculative plan en HCP Terraform.
+4. Integra el PR y abre el run generado en el workspace.
+5. Inspecciona el plan y pulsa **Confirm & Apply**.
+6. Verifica el bucket en Google Cloud Console.
 
-Verifica el bucket desde Google Cloud Console → Cloud Storage. Al finalizar, ejecuta `destroy` y confirma que el bucket fue eliminado.
+## 7. Limpiar
+
+Ejecuta destroy desde el workspace, revisa el plan y confirma manualmente. Comprueba que el bucket se haya eliminado y elimina la clave de service account usada en este laboratorio.
+
+## Criterios de éxito
+
+- Workflow de GitHub Actions exitoso.
+- VCS conectado a la carpeta de este ejercicio.
+- PR y commits generan planes/runs en HCP Terraform.
+- Apply manual.
+- State remoto y fuera del repositorio.
 
 ## Preguntas
 
-- ¿Dónde se debe guardar una clave privada?
-- ¿Por qué un service account no debería tener Owner?
-- ¿Qué riesgos tiene guardar claves JSON de larga duración?
-- ¿Cómo se migraría a Workload Identity Federation?
+1. ¿Qué diferencia hay entre un service account y una identidad federada?
+2. ¿Por qué es peligroso almacenar la clave JSON en el repo?
+3. ¿Qué ventaja tiene que HCP Terraform guarde el state?
+4. ¿Qué acciones corresponden a GitHub Actions y cuáles a HCP Terraform?
 
 ## Referencias
 
-- [Google GitHub Actions Auth](https://github.com/google-github-actions/auth)
-- [Google provider para Terraform](https://registry.terraform.io/providers/hashicorp/google/latest/docs)
+- [HCP Terraform VCS workflow](https://developer.hashicorp.com/terraform/cloud-docs/run/ui)
+- [Google provider authentication](https://registry.terraform.io/providers/hashicorp/google/latest/docs)
+- [GitHub Actions workflows](https://docs.github.com/actions/writing-workflows)
