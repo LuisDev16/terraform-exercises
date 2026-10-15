@@ -1,37 +1,42 @@
-# Sesión 09 — CI/CD multicloud con GitHub Actions y Terraform
+# Sesión 09 — CI/CD de infraestructura con GitHub Actions y Terraform Cloud
 
-Tres laboratorios independientes para implementar infraestructura como código con GitHub Actions. Cada proveedor mantiene su propio directorio, workflow y guía de configuración de credenciales.
+Estos tres ejercicios están alineados con el tema **CI/CD de infraestructura usando GitHub Actions y Terraform Cloud**. Cada alumno trabajará un proveedor diferente (Azure, AWS o Google Cloud) y conectará su repositorio con un workspace VCS-driven de HCP Terraform.
 
-## Laboratorios
+## Ejercicios
 
-| Ejercicio | Carpeta | Infraestructura |
+| Ejercicio | Carpeta | Resultado |
 |---|---|---|
-| Azure | [09-azure-cicd](./09-azure-cicd) | Resource Group + Storage Account |
-| AWS | [10-aws-cicd](./10-aws-cicd) | S3 privado con versionado y cifrado |
-| Google Cloud | [11-gcp-cicd](./11-gcp-cicd) | Bucket de Cloud Storage privado |
+| 09 — Azure | [09-azure-cicd](./09-azure-cicd) | GitHub Actions valida el código; HCP Terraform ejecuta plan/apply del workspace de Azure |
+| 10 — AWS | [10-aws-cicd](./10-aws-cicd) | GitHub Actions valida el código; HCP Terraform ejecuta plan/apply del workspace de AWS |
+| 11 — GCP | [11-gcp-cicd](./11-gcp-cicd) | GitHub Actions valida el código; HCP Terraform ejecuta plan/apply del workspace de Google Cloud |
 
-## Flujo común
+## Diseño del flujo
 
-- **Pull request:** `terraform fmt -check`, `init`, `validate` y `plan`.
-- **Push a main:** vuelve a validar y genera el plan.
-- **Despliegue:** ejecución manual (`workflow_dispatch`) para hacer `apply` o `destroy`.
-- **Credenciales:** por ahora se utilizan secretos de GitHub para las credenciales/identificadores de autenticación tradicionales de cada proveedor. La autenticación federada queda como mejora posterior del laboratorio.
-- **Protección recomendada:** configura un environment `production` con revisores requeridos para proteger el despliegue.
+1. **GitHub Actions CI:** checkout, `terraform fmt -check` y comprobaciones estáticas de los archivos del proveedor.
+2. **VCS-driven workflow:** HCP Terraform está conectado al repositorio y al directorio de trabajo específico del ejercicio.
+3. **Plan:** cada commit genera un run en HCP Terraform; el alumno revisa el plan antes de aplicar.
+4. **Apply:** se aprueba manualmente desde HCP Terraform. No se activa auto-apply para el laboratorio.
+5. **Credenciales cloud:** por ahora se configuran como variables sensibles del workspace de HCP Terraform (o variables de entorno específicas del provider). **No se usa OIDC ni federación de identidad en esta versión.** Esa sería una mejora futura.
+6. **State:** lo gestiona HCP Terraform de forma remota; no se sube el archivo de state al repositorio ni se almacena como artefacto del workflow.
 
-> Los workflows pueden crear recursos reales y generar costos. Revisa el plan antes de aplicar y destruye los recursos al terminar. No utilices cuentas de producción ni guardes credenciales en archivos Terraform.
+## Antes de empezar
 
-## Requisitos generales
+- Cuenta de GitHub con Actions habilitado.
+- Cuenta y organización de HCP Terraform.
+- Acceso para conectar el repositorio mediante VCS.
+- Una cuenta/proyecto/subscripción cloud de laboratorio.
+- Terraform CLI actualizado localmente para seguir los comandos opcionales.
+- Lee el README del proveedor que te corresponde y sigue los pasos en el orden indicado.
 
-- GitHub Actions habilitado en el repositorio.
-- Permisos para crear los recursos descritos en cada proveedor cloud.
-- Configurar las variables/secretos descritos en el README de cada ejercicio.
-- Para equipos, sustituye el state local del runner por un backend remoto con control de acceso y locking.
+> **Costos y seguridad:** los recursos descritos son reales cuando se aprueba el apply. Utiliza cuentas de laboratorio, revisa el plan y ejecuta destroy al finalizar. No uses cuentas de producción ni guardes secretos, archivos de estado o claves JSON en Git.
 
-## Dinámica sugerida
+## Dinámica de clase
 
-1. Completar las credenciales.
-2. Crear una rama y abrir un pull request.
-3. Revisar la validación y el plan en Actions.
-4. Integrar el cambio a `main`.
-5. Ejecutar manualmente `apply` y verificar el recurso.
-6. Ejecutar manualmente `destroy` y confirmar la limpieza.
+1. Preparar el proveedor y las credenciales en HCP Terraform.
+2. Crear un workspace de tipo VCS-driven.
+3. Configurar el working directory y la rama de seguimiento.
+4. Agregar el workflow de GitHub Actions.
+5. Abrir un pull request y revisar las validaciones / speculative plan.
+6. Integrar el cambio, revisar el run y aprobar el apply.
+7. Cambiar un tag, repetir el flujo y revisar la diferencia del plan.
+8. Ejecutar destroy al finalizar.
