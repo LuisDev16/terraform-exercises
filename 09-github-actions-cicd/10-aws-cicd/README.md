@@ -1,59 +1,78 @@
-# Ejercicio 10 — CI/CD en AWS con GitHub Actions y Terraform
+# Ejercicio 10 — AWS: GitHub Actions + Terraform Cloud
 
 ## Objetivo
 
-Crear un bucket S3 privado usando Terraform y GitHub Actions. En esta primera versión se utiliza un IAM User con access key guardada como secreto de GitHub. La autenticación OIDC se puede implementar en un siguiente ejercicio.
+Construir un flujo CI/CD para crear un bucket S3 con seguridad básica. GitHub Actions realiza validaciones y HCP Terraform administra el state, los runs y el apply. **En esta primera versión no se usa autenticación federada.**
 
-## 1. Requisitos
+## Flujo
 
-- Cuenta AWS de laboratorio con permisos para crear y administrar S3.
-- AWS CLI para comprobar la identidad y los recursos.
-- Un usuario IAM dedicado exclusivamente al laboratorio.
+`Pull Request → GitHub Actions (fmt/checks) → HCP Terraform speculative plan → merge a main → HCP Terraform plan → aprobación manual → apply`
 
-## 2. Crear credenciales IAM
+## 1. Crear credenciales para el laboratorio
 
-En AWS Console → IAM → Users, crea un usuario dedicado al laboratorio y genera una access key para uso programático. No reutilices credenciales personales ni de producción.
+En AWS IAM, crea un usuario técnico dedicado al laboratorio y genera una access key para este. No uses credenciales personales o de producción.
 
-Asigna únicamente permisos necesarios para crear, consultar, configurar y eliminar el bucket del laboratorio. Evita `AdministratorAccess`; la política exacta debe incluir acciones de S3 requeridas por Terraform y limitar recursos siempre que sea posible.
-
-En GitHub → Settings → Secrets and variables → Actions → Secrets configura:
+En el workspace de HCP Terraform añade variables de entorno sensibles:
 - `AWS_ACCESS_KEY_ID`
 - `AWS_SECRET_ACCESS_KEY`
+- `AWS_DEFAULT_REGION` = `us-east-1` (o región de laboratorio)
 
-En Variables configura:
-- `AWS_REGION`, por ejemplo `us-east-1`.
+La política del usuario debe limitarse a las operaciones S3 requeridas y al bucket del laboratorio cuando sea posible. Evita `AdministratorAccess`. Las access keys son credenciales de larga duración: guárdalas únicamente en HCP Terraform, no en GitHub, Terraform files ni logs. Revócalas al finalizar.
 
-Nunca escribas las credenciales en archivos, commits, outputs ni logs. Rota y elimina la access key cuando termines el curso.
+## 2. Configurar el workspace VCS-driven
 
-## 3. Qué crea Terraform
+1. En HCP Terraform crea el workspace `gha-aws-cicd`.
+2. Conecta `aldo2510/terraform-exercises` con la integración VCS.
+3. Configura la rama `main`.
+4. Establece el working directory como `09-github-actions-cicd/10-aws-cicd`.
+5. Desactiva Auto Apply para revisar y confirmar los planes manualmente.
 
-Un bucket S3 con nombre que combina prefijo, ID de cuenta y región, junto con:
-- bloqueo completo de acceso público,
+El state se guarda en HCP Terraform. No configures un backend S3 dentro de esta misma carpeta: el workspace remoto controla el state.
+
+## 3. Recursos del ejercicio
+
+Terraform crea un bucket S3 cuyo nombre se basa en prefijo, ID de cuenta y región. Habilita:
+- bloqueo total de acceso público,
 - versionado,
 - cifrado SSE-S3.
 
-El ejercicio no carga archivos de usuario.
+El bucket debe estar vacío antes del destroy; no uses esta práctica para almacenar información real.
 
-## 4. CI por pull request
+## 4. Validación mediante GitHub Actions
 
-Abre un pull request con una modificación de tags o variables. GitHub Actions ejecuta `fmt -check`, `init`, `validate` y `plan`. No se aplican cambios automáticamente al pull request.
+El workflow `.github/workflows/aws-terraform.yml` ejecuta `terraform fmt -check`, `init -backend=false` y `validate`. No necesita credenciales AWS porque no ejecuta el plan de recursos desde el runner.
 
-## 5. Desplegar
+## 5. Ejecutar el ciclo CI/CD
 
-Integra el cambio en `main`, entra a **Actions → AWS Terraform → Run workflow** y selecciona `apply`. El job utiliza el environment `production`; puedes protegerlo con required reviewers desde Settings → Environments.
+1. Abre una rama y modifica un tag o el prefijo.
+2. Abre un pull request a `main` y revisa el workflow en **Actions**.
+3. En HCP Terraform abre `gha-aws-cicd` y revisa el speculative plan.
+4. Integra el cambio.
+5. Revisa el plan del run que se inicia en el workspace y confirma manualmente el apply.
+6. Comprueba el bucket en AWS Console.
 
-## 6. Limpiar
+## 6. Destruir recursos
 
-Lanza el mismo workflow con la operación `destroy`. Si el bucket contiene objetos o versiones, deberá vaciarse de forma controlada antes de que Terraform pueda eliminarlo. Verifica en AWS Console que el recurso ya no exista.
+Inicia un run destroy desde HCP Terraform, revisa el plan y confirma manualmente. Si hay objetos o versiones, vacía el bucket de forma controlada primero. Después, revoca/elimina la access key temporal del laboratorio.
+
+## Criterios de éxito
+
+- GitHub Actions valida HCL y formato.
+- HCP Terraform se conecta al repositorio y carpeta correctos.
+- Los PR generan speculative plan.
+- Los commits generan runs en HCP Terraform.
+- Apply requiere confirmación manual.
+- State remoto sin archivos .tfstate en Git.
 
 ## Preguntas
 
-- ¿Por qué las claves se guardan como GitHub Secrets?
-- ¿Qué diferencia hay entre access key y un rol IAM?
-- ¿Qué riesgo tiene una clave de larga duración?
-- ¿Cómo se podría reemplazar por OIDC?
+1. ¿Qué diferencia hay entre una access key y OIDC?
+2. ¿Qué hace HCP Terraform con el state?
+3. ¿Qué valida GitHub Actions antes de llegar al plan?
+4. ¿Por qué conviene desactivar Auto Apply en el laboratorio?
 
 ## Referencias
 
-- [AWS credentials action](https://github.com/aws-actions/configure-aws-credentials)
-- [AWS provider para Terraform](https://registry.terraform.io/providers/hashicorp/aws/latest/docs)
+- [HCP Terraform VCS workflow](https://developer.hashicorp.com/terraform/cloud-docs/run/ui)
+- [AWS provider authentication](https://registry.terraform.io/providers/hashicorp/aws/latest/docs)
+- [GitHub Actions workflows](https://docs.github.com/actions/writing-workflows)
