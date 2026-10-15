@@ -1,4 +1,4 @@
-name: GCP Terraform
+name: Google Cloud Terraform CI
 
 on:
   pull_request:
@@ -9,23 +9,16 @@ on:
     paths:
       - "09-github-actions-cicd/11-gcp-cicd/**"
   workflow_dispatch:
-    inputs:
-      action:
-        description: "Operation to execute"
-        required: true
-        type: choice
-        options: [apply, destroy]
 
 permissions:
   contents: read
 
 concurrency:
-  group: gcp-terraform-${{ github.ref }}
-  cancel-in-progress: false
+  group: gcp-terraform-ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  validate-plan:
-    if: github.event_name != 'workflow_dispatch'
+  validate:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -35,42 +28,12 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.14.0"
-      - uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCP_CREDENTIALS_JSON }}
-      - run: terraform fmt -check -recursive
-      - run: terraform init
-      - run: terraform validate
-      - name: Terraform plan
-        run: terraform plan -no-color -input=false -var="project_id=${{ vars.GCP_PROJECT_ID }}" -var="region=${{ vars.GCP_REGION }}"
-
-  deploy:
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    environment: production
-    defaults:
-      run:
-        working-directory: 09-github-actions-cicd/11-gcp-cicd
-    steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: "1.14.0"
-      - uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCP_CREDENTIALS_JSON }}
-      - run: terraform fmt -check -recursive
-      - run: terraform init
-      - run: terraform validate
-      - name: Plan apply
-        if: inputs.action == 'apply'
-        run: terraform plan -out=tfplan -var="project_id=${{ vars.GCP_PROJECT_ID }}" -var="region=${{ vars.GCP_REGION }}"
-      - name: Apply
-        if: inputs.action == 'apply'
-        run: terraform apply -auto-approve tfplan
-      - name: Destroy plan
-        if: inputs.action == 'destroy'
-        run: terraform plan -destroy -out=tfplan -var="project_id=${{ vars.GCP_PROJECT_ID }}" -var="region=${{ vars.GCP_REGION }}"
-      - name: Destroy
-        if: inputs.action == 'destroy'
-        run: terraform apply -auto-approve tfplan
+          terraform_wrapper: false
+      - name: Terraform formatting
+        run: terraform fmt -check -recursive
+      - name: Basic HCL validation (no cloud credentials)
+        run: |
+          terraform init -backend=false
+          terraform validate
+      - name: Explain next step
+        run: echo "HCP Terraform VCS workspace runs plan/apply; approve runs from the HCP Terraform UI."
