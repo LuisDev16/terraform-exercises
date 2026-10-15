@@ -1,0 +1,50 @@
+name: Azure Terraform CLI
+on:
+  pull_request:
+    paths: ["10-github-actions-cicd-sin-terraform-cloud/12-azure-cicd/**"]
+  push:
+    branches: [main]
+    paths: ["10-github-actions-cicd-sin-terraform-cloud/12-azure-cicd/**"]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "apply or destroy"
+        required: true
+        type: choice
+        options: [apply, destroy]
+permissions:
+  contents: read
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: 10-github-actions-cicd-sin-terraform-cloud/12-azure-cicd
+    env:
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+      TF_VAR_subscription_id: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.14.0"
+          terraform_wrapper: false
+      - uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS_JSON }}
+      - run: terraform init -input=false -backend-config="resource_group_name=${{ vars.AZURE_STATE_RESOURCE_GROUP }}" -backend-config="storage_account_name=${{ vars.AZURE_STATE_STORAGE_ACCOUNT }}" -backend-config="container_name=${{ vars.AZURE_STATE_CONTAINER }}" -backend-config="key=${{ vars.AZURE_STATE_KEY }}"
+      - run: terraform fmt -check -recursive
+      - run: terraform validate
+      - name: Plan
+        if: github.event_name != 'workflow_dispatch'
+        run: terraform plan -no-color -input=false -var="location=${{ vars.AZURE_LOCATION }}"
+      - name: Apply
+        if: inputs.action == 'apply'
+        run: terraform plan -out=tfplan -var="location=${{ vars.AZURE_LOCATION }}" && terraform apply -auto-approve tfplan
+      - name: Destroy
+        if: inputs.action == 'destroy'
+        run: terraform plan -destroy -out=tfplan -var="location=${{ vars.AZURE_LOCATION }}" && terraform apply -auto-approve tfplan
