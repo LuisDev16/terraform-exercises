@@ -1,0 +1,80 @@
+name: AWS Terraform
+
+on:
+  pull_request:
+    paths:
+      - "09-github-actions-cicd/10-aws-cicd/**"
+  push:
+    branches: [main]
+    paths:
+      - "09-github-actions-cicd/10-aws-cicd/**"
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Operation to execute"
+        required: true
+        type: choice
+        options: [apply, destroy]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aws-terraform-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate-plan:
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: 09-github-actions-cicd/10-aws-cicd
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.14.0"
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - run: terraform fmt -check -recursive
+      - run: terraform init
+      - run: terraform validate
+      - name: Terraform plan
+        run: terraform plan -no-color -input=false -var="aws_region=${{ vars.AWS_REGION }}"
+
+  deploy:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: 09-github-actions-cicd/10-aws-cicd
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.14.0"
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - run: terraform fmt -check -recursive
+      - run: terraform init
+      - run: terraform validate
+      - name: Plan apply
+        if: inputs.action == 'apply'
+        run: terraform plan -out=tfplan -var="aws_region=${{ vars.AWS_REGION }}"
+      - name: Apply
+        if: inputs.action == 'apply'
+        run: terraform apply -auto-approve tfplan
+      - name: Destroy plan
+        if: inputs.action == 'destroy'
+        run: terraform plan -destroy -out=tfplan -var="aws_region=${{ vars.AWS_REGION }}"
+      - name: Destroy
+        if: inputs.action == 'destroy'
+        run: terraform apply -auto-approve tfplan
