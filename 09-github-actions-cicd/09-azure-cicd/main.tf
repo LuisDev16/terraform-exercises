@@ -25,3 +25,7 @@ resource "azurerm_storage_account" "lab" {
 
   tags = azurerm_resource_group.lab.tags
 }
+
+
+
+
