@@ -36,7 +36,7 @@ jobs:
       - uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS_JSON }}
-      - run: terraform init -input=false -backend-config="resource_group_name=${{ vars.AZURE_STATE_RESOURCE_GROUP }}" -backend-config="storage_account_name=${{ vars.AZURE_STATE_STORAGE_ACCOUNT }}" -backend-config="container_name=${{ vars.AZURE_STATE_CONTAINER }}" -backend-config="key=${{ vars.AZURE_STATE_KEY }}"
+      - run: terraform init -input=false -backend-config="resource_group_name=${{ vars.AZURE_STATE_RESOURCE_GROUP }}" -backend-config="storage_account_name=${{ vars.AZURE_STATE_STORAGE_ACCOUNT }}" -backend-config="container_name=${{ vars.AZURE_STATE_CONTAINER }}" -backend-config="key=${{ vars.AZURE_STATE_KEY }}" -backend-config="use_azuread_auth=true"
       - run: terraform fmt -check -recursive
       - run: terraform validate
       - name: Plan
