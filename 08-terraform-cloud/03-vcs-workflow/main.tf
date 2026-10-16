@@ -23,6 +23,6 @@ output "nombre_generado" {
   value = random_pet.demo.id
 }
 
-output "nombre_generado" {
+output "nombre_generado_2" {
   value = random_pet.demo2.id
 }
