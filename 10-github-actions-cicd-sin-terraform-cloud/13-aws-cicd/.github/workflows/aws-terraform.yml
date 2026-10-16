@@ -1,0 +1,46 @@
+name: AWS Terraform CLI
+on:
+  pull_request:
+    paths: ["10-github-actions-cicd-sin-terraform-cloud/13-aws-cicd/**"]
+  push:
+    branches: [main]
+    paths: ["10-github-actions-cicd-sin-terraform-cloud/13-aws-cicd/**"]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "apply or destroy"
+        required: true
+        type: choice
+        options: [apply, destroy]
+permissions:
+  contents: read
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: 10-github-actions-cicd-sin-terraform-cloud/13-aws-cicd
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ${{ vars.AWS_REGION }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.14.0"
+          terraform_wrapper: false
+      - name: Init
+        run: terraform init -input=false -backend-config="bucket=${{ vars.AWS_TFSTATE_BUCKET }}" -backend-config="key=${{ vars.AWS_TFSTATE_KEY }}" -backend-config="region=${{ vars.AWS_REGION }}" -backend-config="encrypt=true" -backend-config="use_lockfile=true"
+      - run: terraform fmt -check -recursive
+      - run: terraform validate
+      - name: Plan
+        if: github.event_name != 'workflow_dispatch'
+        run: terraform plan -no-color -input=false -var="aws_region=${{ vars.AWS_REGION }}"
+      - name: Apply
+        if: inputs.action == 'apply'
+        run: terraform plan -out=tfplan -var="aws_region=${{ vars.AWS_REGION }}" && terraform apply -auto-approve tfplan
+      - name: Destroy
+        if: inputs.action == 'destroy'
+        run: terraform plan -destroy -out=tfplan -var="aws_region=${{ vars.AWS_REGION }}" && terraform apply -auto-approve tfplan
