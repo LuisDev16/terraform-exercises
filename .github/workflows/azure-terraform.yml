@@ -1,0 +1,39 @@
+name: Azure Terraform CI
+
+on:
+  pull_request:
+    paths:
+      - "09-github-actions-cicd/09-azure-cicd/**"
+  push:
+    branches: [main]
+    paths:
+      - "09-github-actions-cicd/09-azure-cicd/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: azure-terraform-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: 09-github-actions-cicd/09-azure-cicd
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.14.0"
+          terraform_wrapper: false
+      - name: Terraform formatting
+        run: terraform fmt -check -recursive
+      - name: Basic HCL validation (no cloud credentials)
+        run: |
+          terraform init -backend=false
+          terraform validate
+      - name: Explain next step
+        run: echo "HCP Terraform VCS workspace runs plan/apply; approve runs from the HCP Terraform UI."
