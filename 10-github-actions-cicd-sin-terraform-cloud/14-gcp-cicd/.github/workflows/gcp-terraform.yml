@@ -1,0 +1,46 @@
+name: Google Cloud Terraform CLI
+on:
+  pull_request:
+    paths: ["10-github-actions-cicd-sin-terraform-cloud/14-gcp-cicd/**"]
+  push:
+    branches: [main]
+    paths: ["10-github-actions-cicd-sin-terraform-cloud/14-gcp-cicd/**"]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "apply or destroy"
+        required: true
+        type: choice
+        options: [apply, destroy]
+permissions:
+  contents: read
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: 10-github-actions-cicd-sin-terraform-cloud/14-gcp-cicd
+    env:
+      GOOGLE_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS_JSON }}
+      GOOGLE_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+      GOOGLE_REGION: ${{ vars.GCP_REGION }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.14.0"
+          terraform_wrapper: false
+      - name: Init
+        run: terraform init -input=false -backend-config="bucket=${{ vars.GCP_TFSTATE_BUCKET }}" -backend-config="prefix=${{ vars.GCP_TFSTATE_PREFIX }}"
+      - run: terraform fmt -check -recursive
+      - run: terraform validate
+      - name: Plan
+        if: github.event_name != 'workflow_dispatch'
+        run: terraform plan -no-color -input=false -var="project_id=${{ vars.GCP_PROJECT_ID }}" -var="region=${{ vars.GCP_REGION }}"
+      - name: Apply
+        if: inputs.action == 'apply'
+        run: terraform plan -out=tfplan -var="project_id=${{ vars.GCP_PROJECT_ID }}" -var="region=${{ vars.GCP_REGION }}" && terraform apply -auto-approve tfplan
+      - name: Destroy
+        if: inputs.action == 'destroy'
+        run: terraform plan -destroy -out=tfplan -var="project_id=${{ vars.GCP_PROJECT_ID }}" -var="region=${{ vars.GCP_REGION }}" && terraform apply -auto-approve tfplan
