@@ -5,6 +5,11 @@ resource "google_storage_bucket" "lab" {
   uniform_bucket_level_access = true
   public_access_prevention = "enforced"
   force_destroy = false
-  versioning { enabled = true }
-  labels = { environment = "lab", managed_by = "terraform" }
+  versioning {
+    enabled = true
+  }
+  labels = {
+    environment = "lab"
+    managed_by = "terraform"
+  }
 }
