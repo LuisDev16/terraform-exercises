@@ -152,7 +152,7 @@ La propagación de permisos puede tardar unos minutos. Si la asignación falla, 
 
 En el repositorio de GitHub, entra a **Settings → Secrets and variables → Actions → Secrets → New repository secret**.
 
-El workflow utiliza únicamente los cuatro Secrets `ARM_*`. Terraform Provider y el backend `azurerm` leen estas variables de entorno para autenticarse con el Service Principal; no se necesita un paso adicional `azure/login@v2`.
+Configura únicamente estos cuatro Secrets. El workflow los expone como variables de entorno `ARM_*`, que Terraform utiliza para autenticarse con el Service Principal tanto con AzureRM Provider como con el backend `azurerm`. No necesitas `azure/login@v2` ni un Secret JSON adicional.
 
 | Secret | Valor |
 |---|---|
@@ -160,27 +160,8 @@ El workflow utiliza únicamente los cuatro Secrets `ARM_*`. Terraform Provider y
 | `ARM_CLIENT_SECRET` | El `password` del Service Principal |
 | `ARM_TENANT_ID` | El ID del tenant, campo `tenant` |
 | `ARM_SUBSCRIPTION_ID` | El ID de la suscripción seleccionada |
-| `AZURE_CREDENTIALS_JSON` | JSON de credenciales utilizado por `azure/login@v2` |
 
-El valor de `AZURE_CREDENTIALS_JSON` debe tener esta estructura, reemplazando todos los valores de ejemplo:
-
-```json
-{
-  "clientId": "<APP_ID>",
-  "clientSecret": "<CLIENT_SECRET>",
-  "subscriptionId": "<SUBSCRIPTION_ID>",
-  "tenantId": "<TENANT_ID>"
-}
-```
-
-Pega el JSON completo como valor del Secret. No subas un archivo con estas credenciales al repositorio ni las incluyas en capturas o logs.
-
-**¿Por qué se configuran cinco Secrets?**
-
-- Los cuatro `ARM_*` permiten que Terraform Provider y el backend se autentiquen con el Service Principal.
-- `AZURE_CREDENTIALS_JSON` se utiliza en el paso `azure/login@v2` del workflow actual.
-
-Si en una versión posterior se elimina el paso `azure/login` y se utiliza solamente autenticación directa de Terraform con `ARM_*`, entonces `AZURE_CREDENTIALS_JSON` dejaría de ser necesario. No lo elimines mientras el workflow siga haciendo referencia a él.
+No publiques el client secret ni lo guardes en el repositorio. Limita el acceso a los Secrets y usa una suscripción de laboratorio.
 
 ## 5. Configura las GitHub Variables
 
