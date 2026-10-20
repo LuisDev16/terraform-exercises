@@ -152,7 +152,7 @@ La propagación de permisos puede tardar unos minutos. Si la asignación falla, 
 
 En el repositorio de GitHub, entra a **Settings → Secrets and variables → Actions → Secrets → New repository secret**.
 
-El workflow de este ejercicio utiliza los cuatro Secrets `ARM_*` para Terraform y el backend, y también utiliza `AZURE_CREDENTIALS_JSON` en el paso `azure/login@v2`. Por eso, **en la versión actual se deben configurar los cinco Secrets**.
+El workflow utiliza únicamente los cuatro Secrets `ARM_*`. Terraform Provider y el backend `azurerm` leen estas variables de entorno para autenticarse con el Service Principal; no se necesita un paso adicional `azure/login@v2`.
 
 | Secret | Valor |
 |---|---|
