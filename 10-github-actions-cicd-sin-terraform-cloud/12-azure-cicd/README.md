@@ -58,25 +58,25 @@ export AZURE_STATE_CONTAINER="tfstate"
 export AZURE_STATE_KEY="12-azure-cicd.terraform.tfstate"
 
 # 1. Crear el Resource Group dedicado al estado
-az group create \\
-  --name "$AZURE_STATE_RESOURCE_GROUP" \\
+az group create \
+  --name "$AZURE_STATE_RESOURCE_GROUP" \
   --location "$AZURE_LOCATION"
 
 # 2. Crear la Storage Account del backend
-az storage account create \\
-  --name "$AZURE_STATE_STORAGE_ACCOUNT" \\
-  --resource-group "$AZURE_STATE_RESOURCE_GROUP" \\
-  --location "$AZURE_LOCATION" \\
-  --sku Standard_LRS \\
-  --kind StorageV2 \\
-  --min-tls-version TLS1_2 \\
-  --allow-blob-public-access false \\
+az storage account create \
+  --name "$AZURE_STATE_STORAGE_ACCOUNT" \
+  --resource-group "$AZURE_STATE_RESOURCE_GROUP" \
+  --location "$AZURE_LOCATION" \
+  --sku Standard_LRS \
+  --kind StorageV2 \
+  --min-tls-version TLS1_2 \
+  --allow-blob-public-access false \
   --https-only true
 
 # 3. Crear el container que alojará el blob de estado
-az storage container create \\
-  --name "$AZURE_STATE_CONTAINER" \\
-  --account-name "$AZURE_STATE_STORAGE_ACCOUNT" \\
+az storage container create \
+  --name "$AZURE_STATE_CONTAINER" \
+  --account-name "$AZURE_STATE_STORAGE_ACCOUNT" \
   --auth-mode login
 ```
 
@@ -109,10 +109,10 @@ az account show --query "{subscriptionId:id, tenantId:tenantId}" --output table
 Crea el Service Principal y asígnale el rol **Contributor** a nivel de la suscripción para este laboratorio:
 
 ```bash
-az ad sp create-for-rbac \\
-  --name "sp-gha-terraform-azure-lab" \\
-  --role "Contributor" \\
-  --scopes "/subscriptions/$(az account show --query id --output tsv)" \\
+az ad sp create-for-rbac \
+  --name "sp-gha-terraform-azure-lab" \
+  --role "Contributor" \
+  --scopes "/subscriptions/$(az account show --query id --output tsv)" \
   --output json
 ```
 
@@ -135,14 +135,14 @@ Sustituye `<APP_ID>` por el `appId` obtenido en el paso anterior:
 ```bash
 export ARM_CLIENT_ID="<APP_ID>"
 
-export AZURE_STATE_STORAGE_ID="$(az storage account show \\
-  --name "$AZURE_STATE_STORAGE_ACCOUNT" \\
-  --resource-group "$AZURE_STATE_RESOURCE_GROUP" \\
+export AZURE_STATE_STORAGE_ID="$(az storage account show \
+  --name "$AZURE_STATE_STORAGE_ACCOUNT" \
+  --resource-group "$AZURE_STATE_RESOURCE_GROUP" \
   --query id --output tsv)"
 
-az role assignment create \\
-  --assignee "$ARM_CLIENT_ID" \\
-  --role "Storage Blob Data Contributor" \\
+az role assignment create \
+  --assignee "$ARM_CLIENT_ID" \
+  --role "Storage Blob Data Contributor" \
   --scope "$AZURE_STATE_STORAGE_ID"
 ```
 
@@ -221,8 +221,8 @@ Desde la raíz del repositorio, ejecuta:
 ```bash
 mkdir -p .github/workflows
 
-git mv \\
-  10-github-actions-cicd-sin-terraform-cloud/12-azure-cicd/.github/workflows/azure-terraform.yml \\
+git mv \
+  10-github-actions-cicd-sin-terraform-cloud/12-azure-cicd/.github/workflows/azure-terraform.yml \
   .github/workflows/azure-terraform-cicd.yml
 
 git add -A
