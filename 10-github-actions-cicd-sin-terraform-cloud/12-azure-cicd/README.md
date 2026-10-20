@@ -1,136 +1,168 @@
 # Ejercicio 12 — Azure CI/CD con GitHub Actions y Terraform CLI
 
-El objetivo es desplegar recursos en Azure desde GitHub Actions usando Terraform CLI. El estado de Terraform (**tfstate**) se guarda en Azure Blob Storage. Este ejercicio no usa Terraform Cloud ni autenticación federada: utiliza un Service Principal con client secret para el laboratorio.
+## Objetivo
 
-> **Importante:** crea primero el backend de estado. Terraform necesita poder acceder al backend durante `terraform init`, antes de poder crear los recursos definidos en el ejercicio. El Resource Group, la Storage Account y el container del backend son independientes de los recursos administrados por el Terraform de este ejercicio y no deben borrarse en `destroy`.
+Desplegar recursos en Azure mediante Terraform CLI y GitHub Actions, guardando el estado de Terraform (**tfstate**) en Azure Blob Storage.
+
+En este ejercicio aprenderás a:
+
+- Crear un backend remoto de Terraform en Azure.
+- Crear un Service Principal para la automatización.
+- Configurar GitHub Secrets y Variables.
+- Corregir la ubicación de un workflow para que GitHub Actions lo detecte.
+- Ejecutar validaciones, `plan`, `apply` y `destroy`.
+
+Este laboratorio usa un **client secret** para autenticar el Service Principal. No usa Terraform Cloud ni autenticación federada OIDC.
+
+> **Importante:** el backend de estado debe existir antes de ejecutar `terraform init`. Es independiente de los recursos que Terraform creará en el ejercicio y no debe eliminarse durante `destroy`.
+
+## Arquitectura del ejercicio
+
+1. **Backend preparado manualmente:** Resource Group, Storage Account y container para el tfstate.
+2. **GitHub Secrets:** credenciales del Service Principal.
+3. **GitHub Variables:** nombres del backend y región de despliegue.
+4. **GitHub Actions:** inicializa Terraform, valida, genera el plan y permite aplicar o destruir los recursos.
+5. **Estado remoto:** Terraform crea y actualiza el blob de estado en Azure Storage.
+
+---
 
 ## 1. Inicia sesión en Azure
 
-Puedes usar [Azure Cloud Shell](https://portal.azure.com/) (Bash) desde el portal, o Azure CLI en tu computadora.
+Puedes utilizar [Azure Cloud Shell](https://portal.azure.com/) en modo Bash o Azure CLI en tu computadora.
 
 ```bash
 az login
 az account list --output table
 ```
 
-Selecciona la suscripción que usarás en el laboratorio:
+Selecciona la suscripción que utilizarás para el laboratorio:
 
 ```bash
 az account set --subscription "<SUBSCRIPTION_ID>"
 az account show --query "{subscriptionId:id, tenantId:tenantId, name:name}" --output json
 ```
 
-Guarda el `subscriptionId` y el `tenantId` para la configuración posterior. Usa una suscripción de laboratorio y verifica que tenga permisos para crear recursos y asignaciones RBAC.
+Guarda los valores de `subscriptionId` y `tenantId`. Utiliza una suscripción de laboratorio y verifica que tu usuario tenga permisos para crear recursos y asignaciones RBAC.
 
-## 2. Crea el backend remoto de tfstate
+## 2. Crea el backend remoto del tfstate
 
-El backend se crea **una sola vez**, antes de ejecutar el workflow. Puedes hacerlo desde Azure Portal o con los siguientes comandos en Bash/Azure Cloud Shell. Los nombres de Storage Account deben ser globalmente únicos, tener entre 3 y 24 caracteres y usar solo letras minúsculas y números. Cambia el sufijo por uno que esté disponible.
+El backend se crea **una sola vez** y antes de ejecutar el workflow. Los siguientes comandos crean un Resource Group dedicado, una Storage Account y un container de Blob Storage.
+
+Los nombres de Storage Account deben ser globalmente únicos, tener entre 3 y 24 caracteres y contener únicamente letras minúsculas y números. Cambia el nombre de ejemplo por uno disponible.
 
 ```bash
-# Ajusta estos valores para tu laboratorio
 export AZURE_LOCATION="eastus"
 export AZURE_STATE_RESOURCE_GROUP="rg-tfstate-lab"
 export AZURE_STATE_STORAGE_ACCOUNT="sttfstatealdo12345"
 export AZURE_STATE_CONTAINER="tfstate"
 export AZURE_STATE_KEY="12-azure-cicd.terraform.tfstate"
 
-# Crear el Resource Group que alojará exclusivamente el tfstate
-az group create \
-  --name "$AZURE_STATE_RESOURCE_GROUP" \
+# 1. Crear el Resource Group dedicado al estado
+az group create \\
+  --name "$AZURE_STATE_RESOURCE_GROUP" \\
   --location "$AZURE_LOCATION"
 
-# Crear la Storage Account para el estado remoto
-az storage account create \
-  --name "$AZURE_STATE_STORAGE_ACCOUNT" \
-  --resource-group "$AZURE_STATE_RESOURCE_GROUP" \
-  --location "$AZURE_LOCATION" \
-  --sku Standard_LRS \
-  --kind StorageV2 \
-  --min-tls-version TLS1_2 \
-  --allow-blob-public-access false \
+# 2. Crear la Storage Account del backend
+az storage account create \\
+  --name "$AZURE_STATE_STORAGE_ACCOUNT" \\
+  --resource-group "$AZURE_STATE_RESOURCE_GROUP" \\
+  --location "$AZURE_LOCATION" \\
+  --sku Standard_LRS \\
+  --kind StorageV2 \\
+  --min-tls-version TLS1_2 \\
+  --allow-blob-public-access false \\
   --https-only true
 
-# Crear el container donde Terraform guardará el archivo de estado
-az storage container create \
-  --name "$AZURE_STATE_CONTAINER" \
-  --account-name "$AZURE_STATE_STORAGE_ACCOUNT" \
+# 3. Crear el container que alojará el blob de estado
+az storage container create \\
+  --name "$AZURE_STATE_CONTAINER" \\
+  --account-name "$AZURE_STATE_STORAGE_ACCOUNT" \\
   --auth-mode login
 ```
 
-Si el último comando devuelve un error de autorización, verifica que tu usuario tenga los permisos de datos necesarios sobre la Storage Account; el permiso para administrar el recurso de Azure no siempre concede por sí solo acceso a los datos de Blob Storage.
+El último comando utiliza la identidad con la que iniciaste sesión en Azure CLI. Si recibes un error de autorización, verifica que tu usuario tenga permisos de datos de Blob Storage, por ejemplo, el rol **Storage Blob Data Contributor** sobre la Storage Account. El rol Contributor de administración de Azure no concede automáticamente acceso a los datos del blob.
 
-**Valores que debes guardar como GitHub Variables:**
+Estos valores se configurarán después como GitHub Variables:
 
-| Variable | Ejemplo | Para qué sirve |
+| Variable | Ejemplo | Uso |
 |---|---|---|
-| `AZURE_STATE_RESOURCE_GROUP` | `rg-tfstate-lab` | Resource Group del backend |
+| `AZURE_STATE_RESOURCE_GROUP` | `rg-tfstate-lab` | Resource Group que contiene el backend |
 | `AZURE_STATE_STORAGE_ACCOUNT` | `sttfstatealdo12345` | Storage Account del backend |
 | `AZURE_STATE_CONTAINER` | `tfstate` | Container de Blob Storage |
-| `AZURE_STATE_KEY` | `12-azure-cicd.terraform.tfstate` | Nombre/ruta del archivo de estado dentro del container |
-| `AZURE_LOCATION` | `eastus` | Región para los recursos del ejercicio |
+| `AZURE_STATE_KEY` | `12-azure-cicd.terraform.tfstate` | Nombre del blob de estado |
+| `AZURE_LOCATION` | `eastus` | Región donde se crearán los recursos del ejercicio |
 
-Los ejemplos son ilustrativos: usa tus nombres reales. No pongas contraseñas ni secretos en Variables.
+Los valores anteriores son ejemplos: registra en GitHub los nombres reales que hayas creado. No almacenes credenciales en Variables.
 
-## 3. Crea la identidad de automatización (Service Principal)
+## 3. Crea el Service Principal para GitHub Actions
 
-El workflow necesita una identidad de Microsoft Entra ID que pueda desplegar los recursos del ejercicio y acceder al backend. Para el laboratorio puedes crear un Service Principal con secreto usando Azure CLI.
+El workflow utiliza una identidad de Microsoft Entra ID para desplegar los recursos y acceder al backend remoto.
 
-### 3.1 Crear el Service Principal
+### 3.1. Crear la identidad
 
-Confirma primero que estás en la suscripción correcta:
+Confirma que seleccionaste la suscripción correcta:
 
 ```bash
 az account show --query "{subscriptionId:id, tenantId:tenantId}" --output table
 ```
 
-Crea el Service Principal y asígnale el rol **Contributor** a nivel de la suscripción solo para este laboratorio:
+Crea el Service Principal y asígnale el rol **Contributor** a nivel de la suscripción para este laboratorio:
 
 ```bash
-az ad sp create-for-rbac \
-  --name "sp-gha-terraform-azure-lab" \
-  --role "Contributor" \
-  --scopes "/subscriptions/$(az account show --query id --output tsv)" \
+az ad sp create-for-rbac \\
+  --name "sp-gha-terraform-azure-lab" \\
+  --role "Contributor" \\
+  --scopes "/subscriptions/$(az account show --query id --output tsv)" \\
   --output json
 ```
 
-El resultado JSON incluye `appId`, `password` y `tenant`. **Copia el valor de `password` de forma segura en este momento**: no se puede recuperar después como texto plano. No lo publiques ni lo guardes en el repositorio.
+La respuesta contiene, entre otros, estos campos:
 
-> **Permisos:** el alcance de suscripción simplifica un laboratorio que crea un Resource Group nuevo. En entornos reales, prefiere el mínimo alcance posible (por ejemplo, un Resource Group de laboratorio ya existente) y revisa las necesidades de creación y asignación de roles. Asignar roles puede requerir permisos administrativos adicionales.
+- `appId`: ID del cliente (Client ID).
+- `password`: client secret.
+- `tenant`: ID del tenant.
 
-### 3.2 Dar acceso al backend
+**Guarda el valor de `password` de forma segura en el momento de crearlo.** No lo publiques ni lo guardes en el repositorio. Azure CLI no vuelve a mostrar el secreto en texto plano después de la creación.
 
-El Service Principal también necesita leer y escribir blobs del estado. Obtén su App ID y asigna **Storage Blob Data Contributor** en el alcance de la Storage Account del backend.
+> **Alcance de permisos:** Contributor a nivel de suscripción facilita este laboratorio porque Terraform crea un Resource Group nuevo. Es un alcance amplio y debe limitarse a una suscripción de laboratorio. En entornos reales utiliza el mínimo alcance necesario. Crear asignaciones RBAC requiere permisos administrativos adicionales.
+
+### 3.2. Dar acceso al backend remoto
+
+Como el backend usa autenticación Microsoft Entra ID, el Service Principal necesita el rol **Storage Blob Data Contributor** sobre la Storage Account que contiene el tfstate.
+
+Sustituye `<APP_ID>` por el `appId` obtenido en el paso anterior:
 
 ```bash
-# Sustituye por el appId que devolvió el comando anterior
 export ARM_CLIENT_ID="<APP_ID>"
 
-export AZURE_STATE_STORAGE_ID="$(az storage account show \
-  --name "$AZURE_STATE_STORAGE_ACCOUNT" \
-  --resource-group "$AZURE_STATE_RESOURCE_GROUP" \
+export AZURE_STATE_STORAGE_ID="$(az storage account show \\
+  --name "$AZURE_STATE_STORAGE_ACCOUNT" \\
+  --resource-group "$AZURE_STATE_RESOURCE_GROUP" \\
   --query id --output tsv)"
 
-az role assignment create \
-  --assignee "$ARM_CLIENT_ID" \
-  --role "Storage Blob Data Contributor" \
+az role assignment create \\
+  --assignee "$ARM_CLIENT_ID" \\
+  --role "Storage Blob Data Contributor" \\
   --scope "$AZURE_STATE_STORAGE_ID"
 ```
 
-La propagación de permisos puede tardar unos minutos. La asignación de roles podría requerir que quien ejecuta el comando tenga permisos RBAC para crear asignaciones.
+La propagación de permisos puede tardar unos minutos. Si la asignación falla, verifica que tu usuario tenga permisos para asignar roles en ese alcance.
 
 ## 4. Configura los GitHub Secrets
 
-En GitHub abre el repositorio y entra a **Settings → Secrets and variables → Actions → Secrets → New repository secret**. Crea estos cinco Secrets:
+En el repositorio de GitHub, entra a **Settings → Secrets and variables → Actions → Secrets → New repository secret**.
+
+El workflow de este ejercicio utiliza los cuatro Secrets `ARM_*` para Terraform y el backend, y también utiliza `AZURE_CREDENTIALS_JSON` en el paso `azure/login@v2`. Por eso, **en la versión actual se deben configurar los cinco Secrets**.
 
 | Secret | Valor |
 |---|---|
 | `ARM_CLIENT_ID` | El `appId` del Service Principal |
-| `ARM_CLIENT_SECRET` | El `password` devuelto al crear el Service Principal |
-| `ARM_TENANT_ID` | El `tenantId` de `az account show` o el campo `tenant` del resultado |
-| `ARM_SUBSCRIPTION_ID` | El ID de la suscripción elegida |
-| `AZURE_CREDENTIALS_JSON` | JSON con los campos `clientId`, `clientSecret`, `subscriptionId` y `tenantId` |
+| `ARM_CLIENT_SECRET` | El `password` del Service Principal |
+| `ARM_TENANT_ID` | El ID del tenant, campo `tenant` |
+| `ARM_SUBSCRIPTION_ID` | El ID de la suscripción seleccionada |
+| `AZURE_CREDENTIALS_JSON` | JSON de credenciales utilizado por `azure/login@v2` |
 
-Para `AZURE_CREDENTIALS_JSON`, el contenido debe tener esta forma (reemplaza los valores de ejemplo por los tuyos):
+El valor de `AZURE_CREDENTIALS_JSON` debe tener esta estructura, reemplazando todos los valores de ejemplo:
 
 ```json
 {
@@ -141,13 +173,18 @@ Para `AZURE_CREDENTIALS_JSON`, el contenido debe tener esta forma (reemplaza los
 }
 ```
 
-Pega el JSON como un solo valor de Secret en GitHub; el contenido puede conservar saltos de línea. No pegues las comillas de Markdown ni subas este JSON como archivo al repositorio.
+Pega el JSON completo como valor del Secret. No subas un archivo con estas credenciales al repositorio ni las incluyas en capturas o logs.
 
-**Nota:** `AZURE_CREDENTIALS_JSON` solo es necesario si el workflow usa una acción como `azure/login` que lo consume. Los Secrets `ARM_*` son los que utiliza Terraform Provider/Backend en la configuración habitual. Si el workflow actual no lee `AZURE_CREDENTIALS_JSON`, el Secret no interviene en la autenticación de ese workflow.
+**¿Por qué se configuran cinco Secrets?**
+
+- Los cuatro `ARM_*` permiten que Terraform Provider y el backend se autentiquen con el Service Principal.
+- `AZURE_CREDENTIALS_JSON` se utiliza en el paso `azure/login@v2` del workflow actual.
+
+Si en una versión posterior se elimina el paso `azure/login` y se utiliza solamente autenticación directa de Terraform con `ARM_*`, entonces `AZURE_CREDENTIALS_JSON` dejaría de ser necesario. No lo elimines mientras el workflow siga haciendo referencia a él.
 
 ## 5. Configura las GitHub Variables
 
-Ve a **Settings → Secrets and variables → Actions → Variables → New repository variable** y registra las cinco variables del paso 2:
+Ve a **Settings → Secrets and variables → Actions → Variables → New repository variable** y crea las siguientes cinco Variables:
 
 - `AZURE_STATE_RESOURCE_GROUP`
 - `AZURE_STATE_STORAGE_ACCOUNT`
@@ -155,37 +192,93 @@ Ve a **Settings → Secrets and variables → Actions → Variables → New repo
 - `AZURE_STATE_KEY`
 - `AZURE_LOCATION`
 
-Estas variables identifican el backend y la región. No deben contener credenciales.
+Utiliza exactamente los mismos valores que configuraste al crear el backend en el paso 2. Las Variables identifican el backend y la región; no deben contener contraseñas ni secretos.
 
-## 6. ¿Cómo se crea y utiliza el tfstate?
+## 6. Mueve el workflow a la ubicación correcta
 
-El flujo es el siguiente:
+Este paso es intencional y forma parte del ejercicio.
 
-1. **Preparación inicial (manual):** se crean el Resource Group del backend, la Storage Account y el container.
-2. **`terraform init`:** el backend `azurerm` se conecta a esa Storage Account y prepara el estado remoto usando las variables del workflow.
-3. **Plan/apply:** Terraform lee y actualiza el blob cuyo nombre se define en `AZURE_STATE_KEY`. El archivo puede no existir antes del primer `apply`; Terraform lo crea al guardar el primer estado.
-4. **Ejecuciones siguientes:** el mismo backend y la misma key permiten que los workflows compartan el estado y gestionen el bloqueo cuando corresponda.
+GitHub Actions detecta automáticamente los workflows del repositorio que se encuentran en la carpeta **`.github/workflows/` de la raíz del repositorio**. En este ejercicio, el archivo está inicialmente dentro de la carpeta del propio ejercicio:
 
-No crees la Storage Account del backend desde el mismo estado que depende de ella: sería una dependencia circular, porque `terraform init` necesita que el backend ya exista. Para automatizar también la creación del backend, usa un estado/bootstrap separado y una identidad con permisos adecuados.
+```text
+10-github-actions-cicd-sin-terraform-cloud/
+└── 12-azure-cicd/
+    └── .github/
+        └── workflows/
+            └── azure-terraform.yml
+```
 
-## 7. Ejecuta el ejercicio
+Debes moverlo a la raíz del repositorio y renombrarlo:
 
-1. Cambia un tag en una rama y abre un Pull Request.
-2. Revisa en **Actions** que pasen `fmt`, `validate` y `plan`.
+```text
+.github/
+└── workflows/
+    └── azure-terraform-cicd.yml
+```
+
+Desde la raíz del repositorio, ejecuta:
+
+```bash
+mkdir -p .github/workflows
+
+git mv \\
+  10-github-actions-cicd-sin-terraform-cloud/12-azure-cicd/.github/workflows/azure-terraform.yml \\
+  .github/workflows/azure-terraform-cicd.yml
+
+git add -A
+git commit -m "ci: register Azure Terraform workflow"
+git push
+```
+
+Después de mover el archivo:
+
+1. **Conserva los filtros `paths`** que apuntan a `10-github-actions-cicd-sin-terraform-cloud/12-azure-cicd/**`. Así, los cambios de este ejercicio activarán el workflow.
+2. Conserva el `working-directory` que apunta a la carpeta del ejercicio. Terraform debe ejecutarse desde ese directorio.
+3. Revisa que el workflow tenga permisos y Secrets configurados en el repositorio.
+4. Entra a la pestaña **Actions** y comprueba que aparezca el workflow **Azure Terraform CLI**.
+
+El workflow anidado no se ejecutará automáticamente desde su ubicación original. Moverlo a la raíz es un requisito de GitHub Actions, no un cambio en el código Terraform.
+
+## 7. ¿Cómo se crea y utiliza el tfstate?
+
+El backend se prepara manualmente; el archivo de estado se crea y actualiza automáticamente cuando Terraform guarda el estado por primera vez.
+
+1. **Preparación inicial:** ya existen el Resource Group, la Storage Account y el container del backend.
+2. **`terraform init`:** el workflow inicializa el backend `azurerm` usando los valores de las GitHub Variables y `use_azuread_auth=true`.
+3. **Plan y apply:** Terraform lee y actualiza el blob definido por `AZURE_STATE_KEY`. No es necesario crear previamente ese archivo.
+4. **Ejecuciones posteriores:** Terraform utiliza el mismo estado remoto para saber qué recursos administra y detectar diferencias.
+
+No intentes crear la Storage Account del backend desde el mismo estado que depende de ella: `terraform init` necesita que el backend exista antes de poder ejecutar Terraform. Si quieres automatizar la creación del backend, hazlo con un estado de bootstrap separado.
+
+## 8. Ejecuta el ejercicio
+
+Una vez configurado el backend, creados los Secrets y Variables, y movido el workflow a la raíz:
+
+1. Crea una rama y modifica un tag en `main.tf`.
+2. Abre un Pull Request y revisa las comprobaciones que ejecute el workflow.
 3. Integra el cambio en `main`.
-4. En **Actions → Azure Terraform CLI → Run workflow**, selecciona `apply` si el workflow solicita una operación.
-5. Verifica los recursos del ejercicio en Azure Portal.
-6. Cuando termines, ejecuta `destroy` desde el workflow para eliminar los recursos administrados por el ejercicio.
+4. Entra a **Actions → Azure Terraform CLI → Run workflow**.
+5. Selecciona la operación `apply` y ejecuta el workflow manualmente.
+6. Verifica en Azure Portal el Resource Group y la Storage Account creados por Terraform.
+7. Al terminar el laboratorio, ejecuta nuevamente el workflow y selecciona `destroy`.
 
-**No borres el Resource Group ni la Storage Account del backend durante `destroy`.** Sin el backend, el estado y la coordinación de Terraform podrían perderse. Revisa cuidadosamente el plan antes de confirmar cualquier destrucción.
+El workflow ejecuta `fmt`, `validate` y `plan`; para la ejecución manual, el input permite seleccionar `apply` o `destroy`.
 
-## Buenas prácticas para el laboratorio
+> **Seguridad:** el workflow actual ejecuta un plan autenticado durante eventos de Pull Request y utiliza el ambiente de GitHub llamado `production`. Para un laboratorio, utiliza solo ramas y Pull Requests de confianza y revisa las protecciones del ambiente. En un entorno compartido o productivo, es preferible separar las validaciones sin credenciales de los despliegues autenticados y exigir aprobación antes de aplicar o destruir.
 
-- No guardes secretos, archivos `.tfstate`, ni archivos `.tfstate.backup` en Git.
-- No reutilices esta identidad para cargas de trabajo reales.
-- En producción, considera GitHub OIDC con autenticación federada en lugar de un client secret de larga duración.
-- Protege el ambiente de despliegue con aprobaciones y revisores requeridos.
-- Elimina o rota el client secret cuando ya no lo necesites.
+### Qué recursos elimina destroy
+
+`destroy` elimina los recursos que forman parte del estado de este ejercicio, como el Resource Group `rg-gha-tf-azure-lab` y la Storage Account `ghatfazurelab01`, siempre que esos nombres no se hayan modificado.
+
+**No elimines el Resource Group, la Storage Account ni el container del backend remoto durante este paso.** El backend no pertenece al estado de este ejercicio. Revísalo antes de confirmar cualquier operación destructiva.
+
+## Buenas prácticas
+
+- Nunca subas secretos, archivos `.tfstate` ni archivos `.tfstate.backup` a Git.
+- Usa una suscripción de laboratorio y una identidad exclusiva para el ejercicio.
+- Revisa los planes antes de ejecutar `apply` o `destroy`.
+- En entornos productivos, evalúa autenticación federada con GitHub OIDC para evitar client secrets de larga duración.
+- Rota o elimina el client secret cuando ya no sea necesario.
 
 ## Referencias oficiales
 
@@ -195,3 +288,4 @@ No crees la Storage Account del backend desde el mismo estado que depende de ell
 - [Crear containers de Blob Storage](https://learn.microsoft.com/en-us/azure/storage/blobs/blob-containers-cli)
 - [Guardar el estado de Terraform en Azure Storage](https://learn.microsoft.com/en-us/azure/developer/terraform/store-state-in-azure-storage)
 - [Terraform azurerm backend](https://developer.hashicorp.com/terraform/language/backend/azurerm)
+- [GitHub Actions: workflows](https://docs.github.com/en/actions/writing-workflows)
