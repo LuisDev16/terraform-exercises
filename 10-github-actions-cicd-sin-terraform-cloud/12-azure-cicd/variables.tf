@@ -1,7 +1,8 @@
 variable "subscription_id" {
   type = string
 }
+
 variable "location" {
-  type = string
+  type    = string
   default = "eastus"
 }
