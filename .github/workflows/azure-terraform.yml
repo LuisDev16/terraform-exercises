@@ -1,39 +1,47 @@
-name: Azure Terraform CI
-
+name: Azure Terraform CLI
 on:
   pull_request:
-    paths:
-      - "09-github-actions-cicd/09-azure-cicd/**"
+    paths: ["10-github-actions-cicd-sin-terraform-cloud/12-azure-cicd/**"]
   push:
     branches: [main]
-    paths:
-      - "09-github-actions-cicd/09-azure-cicd/**"
+    paths: ["10-github-actions-cicd-sin-terraform-cloud/12-azure-cicd/**"]
   workflow_dispatch:
-
+    inputs:
+      action:
+        description: "apply or destroy"
+        required: true
+        type: choice
+        options: [apply, destroy]
 permissions:
   contents: read
-
-concurrency:
-  group: azure-terraform-ci-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  validate:
+  terraform:
     runs-on: ubuntu-latest
+#    environment: production
     defaults:
       run:
-        working-directory: 09-github-actions-cicd/09-azure-cicd
+        working-directory: 10-github-actions-cicd-sin-terraform-cloud/12-azure-cicd
+    env:
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+      TF_VAR_subscription_id: ${{ secrets.ARM_SUBSCRIPTION_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.14.0"
           terraform_wrapper: false
-      - name: Terraform formatting
-        run: terraform fmt -check -recursive
-      - name: Basic HCL validation (no cloud credentials)
-        run: |
-          terraform init -backend=false
-          terraform validate
-      - name: Explain next step
-        run: echo "HCP Terraform VCS workspace runs plan/apply; approve runs from the HCP Terraform UI."
+      - run: terraform init -input=false -backend-config="resource_group_name=${{ vars.AZURE_STATE_RESOURCE_GROUP }}" -backend-config="storage_account_name=${{ vars.AZURE_STATE_STORAGE_ACCOUNT }}" -backend-config="container_name=${{ vars.AZURE_STATE_CONTAINER }}" -backend-config="key=${{ vars.AZURE_STATE_KEY }}" -backend-config="use_azuread_auth=true"
+      - run: terraform fmt -check -recursive
+      - run: terraform validate
+      - name: Plan
+        if: github.event_name != 'workflow_dispatch'
+        run: terraform plan -no-color -input=false -var="location=${{ vars.AZURE_LOCATION }}"
+      - name: Apply
+        if: inputs.action == 'apply'
+        run: terraform plan -out=tfplan -var="location=${{ vars.AZURE_LOCATION }}" && terraform apply -auto-approve tfplan
+      - name: Destroy
+        if: inputs.action == 'destroy'
+        run: terraform plan -destroy -out=tfplan -var="location=${{ vars.AZURE_LOCATION }}" && terraform apply -auto-approve tfplan
