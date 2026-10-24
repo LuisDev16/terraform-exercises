@@ -12,7 +12,7 @@ variable "location" {
 variable "name_prefix" {
   description = "Prefix for resources; lowercase letters and numbers only."
   type        = string
-  default     = "ghatflab"
+  default     = "ghatflabterraform"
 
   validation {
     condition     = can(regex("^[a-z0-9]{3,10}$", var.name_prefix))
