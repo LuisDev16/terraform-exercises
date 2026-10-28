@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "apply or destroy"
+        description: "apply or destroy on resoruce"
         required: true
         type: choice
         options: [apply, destroy]
