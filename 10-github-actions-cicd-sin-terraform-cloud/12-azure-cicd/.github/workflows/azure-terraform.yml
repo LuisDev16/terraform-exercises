@@ -17,7 +17,7 @@ permissions:
 jobs:
   terraform:
     runs-on: ubuntu-latest
-    environment: production
+    #environment: production
     defaults:
       run:
         working-directory: 10-github-actions-cicd-sin-terraform-cloud/12-azure-cicd

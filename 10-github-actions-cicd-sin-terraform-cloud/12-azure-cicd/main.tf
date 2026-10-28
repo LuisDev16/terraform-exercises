@@ -9,7 +9,7 @@ resource "azurerm_resource_group" "lab" {
 }
 
 resource "azurerm_storage_account" "lab" {
-  name                            = "ghatfazurelab01"
+  name                            = "ghatfazuredevlab01"
   resource_group_name             = azurerm_resource_group.lab.name
   location                        = azurerm_resource_group.lab.location
   account_tier                    = "Standard"

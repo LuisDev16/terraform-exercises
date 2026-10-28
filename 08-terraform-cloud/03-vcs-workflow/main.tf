@@ -1,5 +1,5 @@
 terraform {
-  required_version = "~> 1.16.5"
+  required_version = "~> 1.16.4"
 
   required_providers {
     random = {
@@ -14,15 +14,6 @@ resource "random_pet" "demo" {
   separator = "-"
 }
 
-resource "random_pet" "demo2" {
-  length    = 2
-  separator = "-"
-}
-
 output "nombre_generado" {
   value = random_pet.demo.id
-}
-
-output "nombre_generado_2" {
-  value = random_pet.demo2.id
 }
